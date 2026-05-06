@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"shipyard/internal/config"
 	"shipyard/internal/docker"
@@ -30,9 +31,15 @@ var deployCmd = &cobra.Command{
 			return
 		}
 
-		if image == "" {
-			image = repo // default
+		if image != strings.ToLower(image) {
+			fmt.Println("⚠️ Nombre de imagen normalizado a lowercase")
 		}
+
+		if image == "" {
+			image = git.ExtractRepoName(repo)
+		}
+
+		image = docker.NormalizeName(image)
 
 		fullImage := fmt.Sprintf("ghcr.io/%s/%s", cfg.GitHubUser, image)
 
