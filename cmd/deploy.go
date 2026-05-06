@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 
 	"shipyard/internal/config"
 	"shipyard/internal/docker"
@@ -13,69 +12,56 @@ import (
 
 var repo string
 var image string
-var tag string
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
-	Short: "Build y push de una imagen desde un repo",
+	Short: "Build y push de imagen a GHCR usando buildx",
 	Run: func(cmd *cobra.Command, args []string) {
 
+		fmt.Println("🚀 Shipyard deploy iniciado")
+
+		// 1. Cargar configuración
 		cfg, err := config.Load()
 		if err != nil {
 			fmt.Println("❌ Error cargando config:", err)
 			return
 		}
 
+		// 2. Validación básica
 		if repo == "" {
-			fmt.Println("❌ Debes indicar --repo")
+			fmt.Println("❌ Debes indicar --repo user/repo")
 			return
 		}
 
-		if image != strings.ToLower(image) {
-			fmt.Println("⚠️ Nombre de imagen normalizado a lowercase")
-		}
-
+		// 3. Derivar nombre de imagen si no se especifica
 		if image == "" {
 			image = git.ExtractRepoName(repo)
 		}
 
+		// 4. Normalizar nombre (Docker + GHCR rules)
 		image = docker.NormalizeName(image)
 
+		// 5. Construir nombre final GHCR
 		fullImage := fmt.Sprintf("ghcr.io/%s/%s", cfg.GitHubUser, image)
 
-		fmt.Println("🚀 Deploy iniciado")
-		fmt.Println("Repo:", repo)
-		fmt.Println("Imagen:", fullImage)
+		fmt.Println("📦 Repo:", repo)
+		fmt.Println("🐳 Imagen:", fullImage)
 
-		// 1. Clone
+		// 6. Clonar repo
 		dir, err := git.Clone(repo)
 		if err != nil {
-			fmt.Println("❌ Error clonando:", err)
+			fmt.Println("❌ Error clonando repo:", err)
 			return
 		}
 
-		// 2. Build
-		err = docker.Build(fullImage, tag, dir)
+		// 7. Buildx + push directo a GHCR (ARM64)
+		err = docker.BuildAndPush(fullImage, dir)
 		if err != nil {
-			fmt.Println("❌ Error en build:", err)
+			fmt.Println("❌ Error en buildx:", err)
 			return
 		}
 
-		// 3. Login GHCR
-		err = docker.Login(cfg.GitHubUser, cfg.GitHubToken)
-		if err != nil {
-			fmt.Println("❌ Error login GHCR:", err)
-			return
-		}
-
-		// 4. Push
-		err = docker.Push(fullImage, tag)
-		if err != nil {
-			fmt.Println("❌ Error push:", err)
-			return
-		}
-
-		fmt.Println("✅ Imagen subida correctamente")
+		fmt.Println("✅ Imagen publicada correctamente en GHCR")
 	},
 }
 
@@ -83,6 +69,5 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 
 	deployCmd.Flags().StringVar(&repo, "repo", "", "Repositorio GitHub (user/repo)")
-	deployCmd.Flags().StringVar(&image, "image", "", "Nombre de imagen")
-	deployCmd.Flags().StringVar(&tag, "tag", "latest", "Tag de la imagen")
+	deployCmd.Flags().StringVar(&image, "image", "", "Nombre de imagen (opcional)")
 }

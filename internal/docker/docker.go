@@ -6,10 +6,20 @@ import (
 	"shipyard/internal/system"
 )
 
-func Build(image string, tag string, path string) error {
-	full := fmt.Sprintf("%s:%s", image, tag)
+func BuildAndPush(image string, path string) error {
+	full := fmt.Sprintf("%s:latest", image)
 
-	return system.RunCommand("docker", "build", "-t", full, path)
+	return system.RunCommand(
+		"docker",
+		"buildx",
+		"build",
+		"--platform",
+		"linux/arm64",
+		"-t",
+		full,
+		"--push",
+		path, // 👈 CLAVE
+	)
 }
 
 func Push(image string, tag string) error {
