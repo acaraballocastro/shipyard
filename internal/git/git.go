@@ -8,9 +8,9 @@ import (
 )
 
 func Clone(repo string) (string, error) {
-	url := fmt.Sprintf("https://github.com/%s.git", repo)
+	url := fmt.Sprintf("git@github.com:%s.git", repo)
 
-	dir := "./tmp/" + repo
+	dir := "./srv/repos/" + repo
 
 	// limpiar si existe
 	os.RemoveAll(dir)
