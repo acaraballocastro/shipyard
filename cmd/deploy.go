@@ -19,6 +19,7 @@ var volumes []string
 var composePath string
 var mode string
 var domain string
+var internalPort string
 var network string
 var createNetwork bool
 
@@ -99,6 +100,7 @@ var deployCmd = &cobra.Command{
 			mode,
 			domain,
 			network,
+			internalPort,
 			ports,
 			volumes,
 		)
@@ -132,4 +134,5 @@ func init() {
 	deployCmd.Flags().StringVar(&domain, "domain", "", "Dominio para Traefik (ej: app.midominio.com)")
 	deployCmd.Flags().StringVar(&network, "network", "", "Red Docker a usar (opcional)")
 	deployCmd.Flags().BoolVar(&createNetwork, "create-network", false, "Crear red si no existe")
+	deployCmd.Flags().StringVar(&internalPort, "internal-port", "80", "Puerto interno del contenedor (Traefik)")
 }

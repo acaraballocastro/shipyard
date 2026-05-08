@@ -34,6 +34,7 @@ func Generate(
 	mode string,
 	domain string,
 	network string,
+	internalPort string,
 	ports []string,
 	volumes []string,
 ) error {
@@ -61,8 +62,8 @@ func Generate(
 		if network != "" {
 			service.Networks = []string{network}
 		}
-		service.Labels = BuildTraefikLabels(serviceName, domain)
 
+		service.Labels = BuildTraefikLabels(serviceName, domain, internalPort)
 		compose.Services[serviceName] = service
 
 		compose.Networks = map[string]Network{
