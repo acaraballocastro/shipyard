@@ -10,6 +10,11 @@ import (
 type Compose struct {
 	Version  string             `yaml:"version"`
 	Services map[string]Service `yaml:"services"`
+	Networks map[string]Network `yaml:"networks,omitempty"`
+}
+
+type Network struct {
+	External bool `yaml:"external"`
 }
 
 type Service struct {
@@ -18,29 +23,62 @@ type Service struct {
 	Restart       string   `yaml:"restart"`
 	Ports         []string `yaml:"ports,omitempty"`
 	Volumes       []string `yaml:"volumes,omitempty"`
+	Networks      []string `yaml:"networks,omitempty"`
+	Labels        []string `yaml:"labels,omitempty"`
 }
 
-func Generate(path string, serviceName string, image string, ports []string, volumes []string) error {
-
+func Generate(
+	path string,
+	serviceName string,
+	image string,
+	mode string,
+	domain string,
+	network string,
+	ports []string,
+	volumes []string,
+) error {
 	dir := filepath.Join(path, serviceName)
+	os.MkdirAll(dir, 0755)
 
-	// crear carpeta
-	err := os.MkdirAll(dir, 0755)
-	if err != nil {
-		return err
+	service := Service{
+		Image:         image,
+		ContainerName: serviceName,
+		Restart:       "unless-stopped",
 	}
 
 	compose := Compose{
-		Version: "3.8",
+		Version: "3.9",
 		Services: map[string]Service{
-			serviceName: {
-				Image:         image,
-				ContainerName: serviceName,
-				Restart:       "unless-stopped",
-				Ports:         ports,
-				Volumes:       volumes,
-			},
+			serviceName: service,
 		},
+	}
+
+	// =========================
+	// MODE: TRAEFIK
+	// =========================
+	if mode == "traefik" {
+
+		if network != "" {
+			service.Networks = []string{network}
+		}
+		service.Labels = BuildTraefikLabels(serviceName, domain)
+
+		compose.Services[serviceName] = service
+
+		compose.Networks = map[string]Network{
+			"edge": {
+				External: true,
+			},
+		}
+	}
+
+	// =========================
+	// MODE: LOCAL PORTS
+	// =========================
+	if mode == "local" {
+		service.Ports = ports
+		service.Volumes = volumes
+		compose.Services[serviceName] = service
 	}
 
 	data, err := yaml.Marshal(compose)
@@ -49,6 +87,5 @@ func Generate(path string, serviceName string, image string, ports []string, vol
 	}
 
 	file := filepath.Join(dir, "docker-compose.yml")
-
 	return os.WriteFile(file, data, 0644)
 }

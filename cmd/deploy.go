@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"shipyard/internal/compose"
 	"shipyard/internal/config"
@@ -16,6 +17,10 @@ var image string
 var ports []string
 var volumes []string
 var composePath string
+var mode string
+var domain string
+var network string
+var createNetwork bool
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
@@ -67,11 +72,33 @@ var deployCmd = &cobra.Command{
 
 		fmt.Println("✅ Imagen publicada correctamente en GHCR")
 
+		if network != "" && createNetwork {
+			exists := docker.NetworkExists(network)
+
+			if !exists {
+				fmt.Println("🌐 Creando red Docker:", network)
+
+				if err := docker.CreateNetwork(network); err != nil {
+					fmt.Println("❌ Error creando red:", err)
+					return
+				}
+			}
+		}
+
+		if mode == "traefik" && len(ports) > 0 {
+			fmt.Println("⚠️ Traefik mode no necesita ports publicados")
+		}
+
 		// 8. Generar docker-compose
+		serviceName := image
+
 		err = compose.Generate(
 			composePath,
-			image,
+			serviceName,
 			fullImage,
+			mode,
+			domain,
+			network,
 			ports,
 			volumes,
 		)
@@ -81,8 +108,7 @@ var deployCmd = &cobra.Command{
 		}
 
 		// 9. Ejecutar docker compose
-		composeFilePath := composePath + "/" + image
-
+		composeFilePath := filepath.Join(composePath, serviceName)
 		err = docker.ComposeUp(composeFilePath)
 		if err != nil {
 			fmt.Println("❌ Error en docker compose:", err)
@@ -102,4 +128,8 @@ func init() {
 	deployCmd.Flags().StringSliceVar(&ports, "port", []string{}, "Puertos (host:container)")
 	deployCmd.Flags().StringSliceVar(&volumes, "volume", []string{}, "Volúmenes (host:container)")
 	deployCmd.Flags().StringVar(&composePath, "compose-path", "/srv/apps", "Ruta base para docker-compose")
+	deployCmd.Flags().StringVar(&mode, "mode", "local", "Modo: local | traefik")
+	deployCmd.Flags().StringVar(&domain, "domain", "", "Dominio para Traefik (ej: app.midominio.com)")
+	deployCmd.Flags().StringVar(&network, "network", "", "Red Docker a usar (opcional)")
+	deployCmd.Flags().BoolVar(&createNetwork, "create-network", false, "Crear red si no existe")
 }
