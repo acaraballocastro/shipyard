@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"shipyard/internal/compose"
 	"shipyard/internal/config"
 	"shipyard/internal/docker"
 	"shipyard/internal/git"
@@ -12,6 +13,9 @@ import (
 
 var repo string
 var image string
+var ports []string
+var volumes []string
+var composePath string
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
@@ -62,6 +66,31 @@ var deployCmd = &cobra.Command{
 		}
 
 		fmt.Println("✅ Imagen publicada correctamente en GHCR")
+
+		// 8. Generar docker-compose
+		err = compose.Generate(
+			composePath,
+			image,
+			fullImage,
+			ports,
+			volumes,
+		)
+		if err != nil {
+			fmt.Println("❌ Error generando compose:", err)
+			return
+		}
+
+		// 9. Ejecutar docker compose
+		composeFilePath := composePath + "/" + image
+
+		err = docker.ComposeUp(composeFilePath)
+		if err != nil {
+			fmt.Println("❌ Error en docker compose:", err)
+			return
+		}
+
+		fmt.Println("✅ Servicio desplegado correctamente")
+
 	},
 }
 
@@ -70,4 +99,7 @@ func init() {
 
 	deployCmd.Flags().StringVar(&repo, "repo", "", "Repositorio GitHub (user/repo)")
 	deployCmd.Flags().StringVar(&image, "image", "", "Nombre de imagen (opcional)")
+	deployCmd.Flags().StringSliceVar(&ports, "port", []string{}, "Puertos (host:container)")
+	deployCmd.Flags().StringSliceVar(&volumes, "volume", []string{}, "Volúmenes (host:container)")
+	deployCmd.Flags().StringVar(&composePath, "compose-path", "/srv/apps", "Ruta base para docker-compose")
 }
