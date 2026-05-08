@@ -10,7 +10,7 @@ import (
 func Clone(repo string) (string, error) {
 	url := fmt.Sprintf("git@github.com:%s.git", repo)
 
-	dir := "./srv/repos/" + repo
+	dir := "/srv/repos/" + repo
 
 	// limpiar si existe
 	os.RemoveAll(dir)
