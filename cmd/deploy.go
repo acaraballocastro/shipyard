@@ -8,6 +8,7 @@ import (
 	"shipyard/internal/config"
 	"shipyard/internal/docker"
 	"shipyard/internal/git"
+	"shipyard/internal/state"
 
 	"github.com/spf13/cobra"
 )
@@ -119,6 +120,25 @@ var deployCmd = &cobra.Command{
 
 		fmt.Println("✅ Servicio desplegado correctamente")
 
+		st, err := state.Load()
+		if err != nil {
+			fmt.Println("❌ Error state:", err)
+			return
+		}
+
+		st.Apps[image] = state.App{
+			Repo:    repo,
+			Image:   fullImage,
+			Mode:    mode,
+			Domain:  domain,
+			Network: network,
+			Path:    composeFilePath,
+		}
+
+		if err := state.Save(st); err != nil {
+			fmt.Println("❌ Error guardando state:", err)
+			return
+		}
 	},
 }
 
