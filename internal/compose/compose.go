@@ -27,9 +27,6 @@ type Service struct {
 	Labels        []string `yaml:"labels,omitempty"`
 }
 
-// =========================
-// GENERATE COMPOSE
-// =========================
 func Generate(
 	path string,
 	serviceName string,
@@ -41,51 +38,15 @@ func Generate(
 	ports []string,
 	volumes []string,
 ) error {
-
 	dir := filepath.Join(path, serviceName)
 	os.MkdirAll(dir, 0755)
 
-	// =========================
-	// 1. CREATE SERVICE FIRST
-	// =========================
 	service := Service{
 		Image:         image,
 		ContainerName: serviceName,
 		Restart:       "unless-stopped",
 	}
 
-	// =========================
-	// 2. APPLY MODE LOGIC
-	// =========================
-	switch mode {
-
-	// -------------------------
-	// TRAEFIK MODE
-	// -------------------------
-	case "traefik":
-
-		if network != "" {
-			service.Networks = []string{network}
-		}
-
-		service.Labels = BuildTraefikLabels(serviceName, domain, internalPort)
-
-	// -------------------------
-	// LOCAL MODE
-	// -------------------------
-	case "local":
-
-		service.Ports = ports
-		service.Volumes = volumes
-
-		if network != "" {
-			service.Networks = []string{network}
-		}
-	}
-
-	// =========================
-	// 3. BUILD COMPOSE OBJECT
-	// =========================
 	compose := Compose{
 		Version: "3.9",
 		Services: map[string]Service{
@@ -94,19 +55,49 @@ func Generate(
 	}
 
 	// =========================
-	// 4. NETWORKS (GLOBAL)
+	// MODE: TRAEFIK
 	// =========================
-	if network != "" {
+	if mode == "traefik" {
+
+		// =========================
+		// 1. DEFAULT NETWORK
+		// =========================
+		effectiveNetwork := network
+		if effectiveNetwork == "" {
+			effectiveNetwork = "edge"
+		}
+
+		// =========================
+		// 2. APPLY TO SERVICE
+		// =========================
+		service.Networks = []string{effectiveNetwork}
+
+		// =========================
+		// 3. TRAEFIK LABELS
+		// =========================
+		service.Labels = BuildTraefikLabels(serviceName, domain, internalPort)
+
+		compose.Services[serviceName] = service
+
+		// =========================
+		// 4. COMPOSE NETWORK DEFINITION
+		// =========================
 		compose.Networks = map[string]Network{
-			network: {
+			effectiveNetwork: {
 				External: true,
 			},
 		}
 	}
 
 	// =========================
-	// 5. WRITE FILE
+	// MODE: LOCAL PORTS
 	// =========================
+	if mode == "local" {
+		service.Ports = ports
+		service.Volumes = volumes
+		compose.Services[serviceName] = service
+	}
+
 	data, err := yaml.Marshal(compose)
 	if err != nil {
 		return err
