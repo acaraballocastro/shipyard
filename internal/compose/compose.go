@@ -38,15 +38,52 @@ func Generate(
 	ports []string,
 	volumes []string,
 ) error {
+
 	dir := filepath.Join(path, serviceName)
 	os.MkdirAll(dir, 0755)
 
+	// =========================
+	// 1. BUILD SERVICE FIRST
+	// =========================
 	service := Service{
 		Image:         image,
 		ContainerName: serviceName,
 		Restart:       "unless-stopped",
 	}
 
+	// =========================
+	// 2. APPLY MODE LOGIC
+	// =========================
+
+	switch mode {
+
+	// -------------------------
+	// TRAEFIK MODE
+	// -------------------------
+	case "traefik":
+
+		if network != "" {
+			service.Networks = []string{network}
+		}
+
+		service.Labels = BuildTraefikLabels(serviceName, domain, internalPort)
+
+	// -------------------------
+	// LOCAL MODE
+	// -------------------------
+	case "local":
+
+		service.Ports = ports
+		service.Volumes = volumes
+
+		if network != "" {
+			service.Networks = []string{network}
+		}
+	}
+
+	// =========================
+	// 3. BUILD COMPOSE
+	// =========================
 	compose := Compose{
 		Version: "3.9",
 		Services: map[string]Service{
@@ -55,33 +92,19 @@ func Generate(
 	}
 
 	// =========================
-	// MODE: TRAEFIK
+	// 4. OPTIONAL NETWORKS
 	// =========================
-	if mode == "traefik" {
-
-		if network != "" {
-			service.Networks = []string{network}
-		}
-
-		service.Labels = BuildTraefikLabels(serviceName, domain, internalPort)
-		compose.Services[serviceName] = service
-
+	if network != "" {
 		compose.Networks = map[string]Network{
-			"edge": {
+			network: {
 				External: true,
 			},
 		}
 	}
 
 	// =========================
-	// MODE: LOCAL PORTS
+	// 5. WRITE FILE
 	// =========================
-	if mode == "local" {
-		service.Ports = ports
-		service.Volumes = volumes
-		compose.Services[serviceName] = service
-	}
-
 	data, err := yaml.Marshal(compose)
 	if err != nil {
 		return err
