@@ -1,17 +1,44 @@
 package docker
 
 import (
-	"shipyard/internal/system"
+	"os"
+	"os/exec"
 )
 
 func ComposeUp(path string) error {
-	return system.RunCommand(
+
+	// =========================
+	// PULL LATEST IMAGE
+	// =========================
+
+	pull := exec.Command(
 		"docker",
 		"compose",
-		"-f",
-		path+"/docker-compose.yml",
+		"pull",
+	)
+
+	pull.Dir = path
+	pull.Stdout = os.Stdout
+	pull.Stderr = os.Stderr
+
+	if err := pull.Run(); err != nil {
+		return err
+	}
+
+	// =========================
+	// RECREATE CONTAINERS
+	// =========================
+
+	up := exec.Command(
+		"docker",
+		"compose",
 		"up",
 		"-d",
-		"--force-recreate",
 	)
+
+	up.Dir = path
+	up.Stdout = os.Stdout
+	up.Stderr = os.Stderr
+
+	return up.Run()
 }

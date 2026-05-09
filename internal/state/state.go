@@ -7,12 +7,13 @@ import (
 )
 
 type App struct {
-	Repo    string `yaml:"repo"`
-	Image   string `yaml:"image"`
-	Mode    string `yaml:"mode"`
-	Domain  string `yaml:"domain,omitempty"`
-	Network string `yaml:"network,omitempty"`
-	Path    string `yaml:"path"`
+	Repo       string `yaml:"repo"`
+	Image      string `yaml:"image"`
+	Mode       string `yaml:"mode"`
+	Domain     string `yaml:"domain,omitempty"`
+	Network    string `yaml:"network,omitempty"`
+	Path       string `yaml:"path"`
+	LastCommit string `yaml:"last_commit,omitempty"`
 }
 
 type State struct {
