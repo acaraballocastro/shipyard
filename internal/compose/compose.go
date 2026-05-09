@@ -27,6 +27,9 @@ type Service struct {
 	Labels        []string `yaml:"labels,omitempty"`
 }
 
+// =========================
+// GENERATE COMPOSE
+// =========================
 func Generate(
 	path string,
 	serviceName string,
@@ -43,7 +46,7 @@ func Generate(
 	os.MkdirAll(dir, 0755)
 
 	// =========================
-	// 1. BUILD SERVICE FIRST
+	// 1. CREATE SERVICE FIRST
 	// =========================
 	service := Service{
 		Image:         image,
@@ -54,7 +57,6 @@ func Generate(
 	// =========================
 	// 2. APPLY MODE LOGIC
 	// =========================
-
 	switch mode {
 
 	// -------------------------
@@ -82,7 +84,7 @@ func Generate(
 	}
 
 	// =========================
-	// 3. BUILD COMPOSE
+	// 3. BUILD COMPOSE OBJECT
 	// =========================
 	compose := Compose{
 		Version: "3.9",
@@ -92,7 +94,7 @@ func Generate(
 	}
 
 	// =========================
-	// 4. OPTIONAL NETWORKS
+	// 4. NETWORKS (GLOBAL)
 	// =========================
 	if network != "" {
 		compose.Networks = map[string]Network{
