@@ -55,7 +55,7 @@ var deployCmd = &cobra.Command{
 
 			fmt.Println("📦 Modo image:", image)
 
-			serviceName := docker.NormalizeName(image)
+			serviceName := docker.AdvancedNormalizeName(image)
 
 			err = compose.Generate(
 				composePath,
