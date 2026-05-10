@@ -27,10 +27,14 @@ var createNetwork bool
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
-	Short: "Deploy desde repo o imagen Docker",
+	Short: "Deploy desde repo GitHub o imagen Docker",
 	Run: func(cmd *cobra.Command, args []string) {
 
 		fmt.Println("🚀 Shipyard deploy iniciado")
+
+		// =========================
+		// CONFIG
+		// =========================
 
 		cfg, err := config.Load()
 		if err != nil {
@@ -38,82 +42,69 @@ var deployCmd = &cobra.Command{
 			return
 		}
 
-		// =====================================================
-		// VALIDACIÓN DE MODO
-		// =====================================================
+		// =========================
+		// VALIDACIÓN
+		// =========================
 
 		if repo == "" && image == "" {
 			fmt.Println("❌ Debes indicar --repo o --image")
 			return
 		}
 
-		// =====================================================
-		// MODE 2: IMAGE PÚBLICA (SIN BUILD)
-		// =====================================================
+		// =========================
+		// RESOLVER ORIGEN
+		// =========================
 
-		if image != "" && repo == "" {
+		isImage := image != "" && repo == ""
+
+		var serviceName string
+		var finalImage string
+
+		// =========================
+		// IMAGE MODE
+		// =========================
+
+		if isImage {
 
 			fmt.Println("📦 Modo image:", image)
 
-			serviceName := docker.AdvancedNormalizeName(image)
+			serviceName = docker.NormalizeName(image)
+			finalImage = image
+		}
 
-			err = compose.Generate(
-				composePath,
-				serviceName,
-				image,
-				mode,
-				domain,
-				network,
-				internalPort,
-				ports,
-				volumes,
-			)
+		// =========================
+		// REPO MODE
+		// =========================
 
+		if repo != "" {
+
+			if image == "" {
+				image = git.ExtractRepoName(repo)
+			}
+
+			serviceName = docker.NormalizeName(image)
+			finalImage = fmt.Sprintf("ghcr.io/%s/%s", cfg.GitHubUser, serviceName)
+
+			fmt.Println("📦 Repo:", repo)
+			fmt.Println("🐳 Image:", finalImage)
+
+			dir, err := git.Clone(repo)
 			if err != nil {
-				fmt.Println("❌ compose error:", err)
+				fmt.Println("❌ git clone error:", err)
 				return
 			}
 
-			composeFilePath := filepath.Join(composePath, serviceName)
-
-			err = docker.ComposeUp(composeFilePath)
+			err = docker.BuildAndPush(finalImage, dir)
 			if err != nil {
-				fmt.Println("❌ deploy error:", err)
+				fmt.Println("❌ build error:", err)
 				return
 			}
-
-			fmt.Println("✅ Imagen pública desplegada:", image)
-			return
 		}
 
-		// =====================================================
-		// MODE 1: REPO BUILD + GHCR
-		// =====================================================
+		// =========================
+		// NETWORK
+		// =========================
 
-		if image == "" {
-			image = git.ExtractRepoName(repo)
-		}
-
-		image = docker.NormalizeName(image)
-
-		fullImage := fmt.Sprintf("ghcr.io/%s/%s", cfg.GitHubUser, image)
-
-		fmt.Println("📦 Repo:", repo)
-		fmt.Println("🐳 Image:", fullImage)
-
-		dir, err := git.Clone(repo)
-		if err != nil {
-			fmt.Println("❌ git clone error:", err)
-			return
-		}
-
-		err = docker.BuildAndPush(fullImage, dir)
-		if err != nil {
-			fmt.Println("❌ build error:", err)
-			return
-		}
-
-		// network
 		if network != "" && createNetwork {
 			if !docker.NetworkExists(network) {
 				fmt.Println("🌐 creando network:", network)
@@ -121,13 +112,14 @@ var deployCmd = &cobra.Command{
 			}
 		}
 
-		// compose
-		serviceName := image
+		// =========================
+		// COMPOSE GENERATION
+		// =========================
 
 		err = compose.Generate(
 			composePath,
 			serviceName,
-			fullImage,
+			finalImage,
 			mode,
 			domain,
 			network,
@@ -141,6 +133,10 @@ var deployCmd = &cobra.Command{
 			return
 		}
 
+		// =========================
+		// DEPLOY
+		// =========================
+
 		composeFilePath := filepath.Join(composePath, serviceName)
 
 		err = docker.ComposeUp(composeFilePath)
@@ -149,12 +145,15 @@ var deployCmd = &cobra.Command{
 			return
 		}
 
-		// state
+		// =========================
+		// STATE
+		// =========================
+
 		st, err := state.Load()
 		if err == nil {
 			st.Apps[serviceName] = state.App{
 				Repo:    repo,
-				Image:   fullImage,
+				Image:   finalImage,
 				Mode:    mode,
 				Domain:  domain,
 				Network: network,
@@ -163,7 +162,7 @@ var deployCmd = &cobra.Command{
 			_ = state.Save(st)
 		}
 
-		fmt.Println("✅ Servicio desplegado correctamente")
+		fmt.Println("✅ Servicio desplegado correctamente:", serviceName)
 	},
 }
 
