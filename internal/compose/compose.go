@@ -1,94 +1,119 @@
 package compose
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
-
-	"gopkg.in/yaml.v3"
+	"strings"
 )
 
-type Compose struct {
-	Version  string             `yaml:"version"`
-	Services map[string]Service `yaml:"services"`
-	Networks map[string]Network `yaml:"networks,omitempty"`
-}
-
-type Network struct {
-	External bool `yaml:"external"`
-}
-
-type Service struct {
-	Image         string   `yaml:"image"`
-	ContainerName string   `yaml:"container_name"`
-	Restart       string   `yaml:"restart"`
-	Ports         []string `yaml:"ports,omitempty"`
-	Volumes       []string `yaml:"volumes,omitempty"`
-	Networks      []string `yaml:"networks,omitempty"`
-	Labels        []string `yaml:"labels,omitempty"`
-}
-
+// Generate crea un docker-compose.yml según modo local o traefik
 func Generate(
-	path string,
-	serviceName string,
+	basePath string,
+	name string,
 	image string,
 	mode string,
 	domain string,
 	network string,
-	internalPort string,
 	ports []string,
 	volumes []string,
 ) error {
-	dir := filepath.Join(path, serviceName)
-	os.MkdirAll(dir, 0755)
 
-	service := Service{
-		Image:         image,
-		ContainerName: serviceName,
-		Restart:       "unless-stopped",
-	}
+	dir := filepath.Join(basePath, name)
 
-	compose := Compose{
-		Version: "3.9",
-		Services: map[string]Service{
-			serviceName: service,
-		},
-	}
-
-	// =========================
-	// MODE: TRAEFIK
-	// =========================
-	if mode == "traefik" {
-
-		if network != "" {
-			service.Networks = []string{network}
-		} else {
-			service.Networks = []string{"edge"}
-		}
-
-		service.Labels = BuildTraefikLabels(serviceName, domain, internalPort)
-		compose.Services[serviceName] = service
-
-		compose.Networks = map[string]Network{
-			"edge": {
-				External: true,
-			},
-		}
-	}
-
-	// =========================
-	// MODE: LOCAL PORTS
-	// =========================
-	if mode == "local" {
-		service.Ports = ports
-		service.Volumes = volumes
-		compose.Services[serviceName] = service
-	}
-
-	data, err := yaml.Marshal(compose)
-	if err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	file := filepath.Join(dir, "docker-compose.yml")
-	return os.WriteFile(file, data, 0644)
+	filePath := filepath.Join(dir, "docker-compose.yml")
+
+	var b strings.Builder
+
+	// =========================
+	// HEADER
+	// =========================
+
+	b.WriteString(`version: "3.9"
+
+services:
+`)
+
+	// =========================
+	// SERVICE
+	// =========================
+
+	b.WriteString(fmt.Sprintf(`  %s:
+    image: %s
+    container_name: %s
+    restart: unless-stopped
+`, name, image, name))
+
+	// =========================
+	// NETWORKS (service level)
+	// =========================
+
+	if network != "" {
+		b.WriteString(`    networks:
+      - ` + network + `
+`)
+	}
+
+	// =========================
+	// PORTS (LOCAL MODE)
+	// =========================
+
+	if mode == "local" && len(ports) > 0 {
+		b.WriteString(`    ports:
+`)
+		for _, p := range ports {
+			b.WriteString("      - \"" + p + "\"\n")
+		}
+	}
+
+	// =========================
+	// VOLUMES
+	// =========================
+
+	if len(volumes) > 0 {
+		b.WriteString(`    volumes:
+`)
+		for _, v := range volumes {
+			b.WriteString("      - " + v + "\n")
+		}
+	}
+
+	// =========================
+	// TRAEFIK MODE
+	// =========================
+
+	if mode == "traefik" {
+
+		if domain == "" {
+			return fmt.Errorf("traefik mode requiere domain")
+		}
+
+		b.WriteString(`    labels:
+`)
+		b.WriteString("      - \"traefik.enable=true\"\n")
+		b.WriteString(fmt.Sprintf("      - \"traefik.http.routers.%s.rule=Host(`%s`)\"\n", name, domain))
+		b.WriteString(fmt.Sprintf("      - \"traefik.http.services.%s.loadbalancer.server.port=80\"\n", name))
+	}
+
+	// =========================
+	// NETWORK DECLARATION
+	// =========================
+
+	if network != "" {
+		b.WriteString(`
+			networks:
+			` + network + `:
+				external: true
+			`)
+	}
+
+	// =========================
+	// WRITE FILE
+	// =========================
+
+	return os.WriteFile(filePath, []byte(b.String()), 0644)
 }
