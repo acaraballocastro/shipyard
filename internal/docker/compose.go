@@ -7,6 +7,10 @@ import (
 
 func ComposeUp(path string) error {
 
+	// =========================
+	// PULL LATEST IMAGE
+	// =========================
+
 	pull := exec.Command(
 		"docker",
 		"compose",
@@ -20,6 +24,10 @@ func ComposeUp(path string) error {
 	if err := pull.Run(); err != nil {
 		return err
 	}
+
+	// =========================
+	// RECREATE CONTAINERS
+	// =========================
 
 	up := exec.Command(
 		"docker",
