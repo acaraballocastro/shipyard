@@ -8,7 +8,6 @@ import (
 )
 
 type Compose struct {
-	Version  string             `yaml:"version"`
 	Services map[string]Service `yaml:"services"`
 	Networks map[string]Network `yaml:"networks,omitempty"`
 }
@@ -18,13 +17,14 @@ type Network struct {
 }
 
 type Service struct {
-	Image         string   `yaml:"image"`
-	ContainerName string   `yaml:"container_name"`
-	Restart       string   `yaml:"restart"`
-	Ports         []string `yaml:"ports,omitempty"`
-	Volumes       []string `yaml:"volumes,omitempty"`
-	Networks      []string `yaml:"networks,omitempty"`
-	Labels        []string `yaml:"labels,omitempty"`
+	Image         string            `yaml:"image"`
+	ContainerName string            `yaml:"container_name"`
+	Restart       string            `yaml:"restart"`
+	Ports         []string          `yaml:"ports,omitempty"`
+	Volumes       []string          `yaml:"volumes,omitempty"`
+	Networks      []string          `yaml:"networks,omitempty"`
+	Labels        []string          `yaml:"labels,omitempty"`
+	Environment   map[string]string `yaml:"environment,omitempty"`
 }
 
 func Generate(
@@ -39,7 +39,9 @@ func Generate(
 	volumes []string,
 ) error {
 	dir := filepath.Join(path, serviceName)
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
 
 	service := Service{
 		Image:         image,
@@ -47,44 +49,46 @@ func Generate(
 		Restart:       "unless-stopped",
 	}
 
-	compose := Compose{
-		Version: "3.9",
-		Services: map[string]Service{
-			serviceName: service,
-		},
+	c := Compose{
+		Services: map[string]Service{},
 	}
 
 	// =========================
 	// MODE: TRAEFIK
 	// =========================
-	if mode == "traefik" {
 
-		if network != "" {
-			service.Networks = []string{network}
-		} else {
-			service.Networks = []string{"edge"}
+	if mode == "traefik" {
+		net := network
+		if net == "" {
+			net = "edge"
 		}
 
+		service.Networks = []string{net}
 		service.Labels = BuildTraefikLabels(serviceName, domain, internalPort)
-		compose.Services[serviceName] = service
+		service.Volumes = volumes
 
-		compose.Networks = map[string]Network{
-			"edge": {
-				External: true,
-			},
+		c.Services[serviceName] = service
+		c.Networks = map[string]Network{
+			net: {External: true},
 		}
 	}
 
 	// =========================
-	// MODE: LOCAL PORTS
+	// MODE: LOCAL
 	// =========================
+
 	if mode == "local" {
 		service.Ports = ports
 		service.Volumes = volumes
-		compose.Services[serviceName] = service
+
+		c.Services[serviceName] = service
 	}
 
-	data, err := yaml.Marshal(compose)
+	// =========================
+	// WRITE FILE
+	// =========================
+
+	data, err := yaml.Marshal(c)
 	if err != nil {
 		return err
 	}
