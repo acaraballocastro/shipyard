@@ -1,40 +1,58 @@
-# 📦 Shipyard
+# Shipyard
 
-> 🧰 A lightweight CLI tool to deploy Docker applications from GitHub repositories or public images directly to your homelab (Raspberry Pi / Linux servers).
+Shipyard is an open-source CLI tool for deploying and managing Docker containers from images or Git repositories with minimal configuration.
 
-Shipyard automates the full lifecycle of container deployment:
-
-- Build from GitHub repositories
-- Push to GitHub Container Registry (GHCR)
-- Deploy via Docker Compose
-- Support for Traefik or local port mode
-- Manage services via CLI (deploy, restart, logs, delete, cleanup)
+It provides a simple workflow for running services locally or behind a reverse proxy (Traefik), with built-in lifecycle management and deployment tracking.
 
 ---
 
-# ⚓ Features
+## Features
 
-- 🚀 Deploy from GitHub repos (build + GHCR)
-- 📦 Deploy from public Docker images (no build required)
-- 🌐 Traefik support (automatic routing)
-- 🔌 Local port publishing mode
-- 🧱 Docker network management
-- 📊 State tracking of deployed apps
-- 🧹 Cleanup orphan deployments
-- 🗑️ Safe delete with confirmation
-- 📜 Logs and restart commands
+* Deploy Docker images directly from registries
+* Deploy applications from Git repositories
+* Traefik integration (automatic routing + networks)
+* Local mode (direct port exposure)
+* Volume mounting support
+* Service lifecycle management (start, stop, restart, logs, update, delete)
+* Cleanup orphaned deployments
+* Dependency validation (`doctor`)
+* Multi-architecture support (linux/amd64, linux/arm64)
 
 ---
 
-# ⚙️ Requirements
+## Installation
 
-Shipyard assumes your system has:
+### Quick install
 
-- Docker
-- Docker Compose
-- Git
+```bash
+curl -sSL https://raw.githubusercontent.com/acaraballocastro/shipyard/main/install.sh | bash
+```
 
-You can verify with:
+### Manual installation
+
+#### Build from source
+
+```bash
+go build -o shipyard
+```
+
+#### Install binary globally
+
+```bash
+sudo mv shipyard /usr/local/bin/
+```
+
+---
+
+## Requirements
+
+* Docker
+* Docker Compose
+* Git
+* SSH (optional for future remote deployments)
+* Docker Buildx
+
+Verify your environment:
 
 ```bash
 shipyard doctor
@@ -42,54 +60,9 @@ shipyard doctor
 
 ---
 
-# 📥 Installation
+## Usage
 
-## 🟢 Build from source
-
-```bash
-git clone https://github.com/your-user/shipyard
-cd shipyard
-go build -o shipyard
-sudo mv shipyard /usr/local/bin/
-```
-
----
-
-## 🟢 Verify installation
-
-```bash
-shipyard --help
-```
-
----
-
-# 🚀 Usage
-
-## 📦 Deploy from GitHub repository
-
-```bash
-shipyard deploy --repo user/my-app
-```
-
----
-
-## 🌐 Deploy with Traefik
-
-```bash
-shipyard deploy   --repo user/my-app   --mode traefik   --domain app.example.com   --network edge   --create-network
-```
-
----
-
-## 🔌 Deploy with local ports
-
-```bash
-shipyard deploy   --repo user/my-api   --mode local   --port 3000:3000
-```
-
----
-
-## 📦 Deploy public Docker image
+### Deploy a Docker image
 
 ```bash
 shipyard deploy --image traefik/whoami
@@ -97,49 +70,73 @@ shipyard deploy --image traefik/whoami
 
 ---
 
-## 🌐 Public image with Traefik
+### Deploy from a Git repository (Traefik mode)
 
 ```bash
-shipyard deploy   --image traefik/whoami   --mode traefik   --domain whoami.local
+shipyard deploy \
+  --repo user/my-app \
+  --mode traefik \
+  --domain app.example.com \
+  --network edge \
+  --create-network
 ```
 
 ---
 
-# 🗑️ Manage services
+### Deploy in local mode
 
-## 📜 List deployed apps
+```bash
+shipyard deploy \
+  --repo user/my-api \
+  --mode local \
+  --port 3000:3000
+```
+
+---
+
+### Use volumes
+
+```bash
+shipyard deploy \
+  --repo user/app \
+  --volume /srv/data:/app/data
+```
+
+---
+
+## Service Management
+
+### List services
 
 ```bash
 shipyard list
 ```
 
----
-
-## 🔄 Restart service
+### Restart a service
 
 ```bash
-shipyard restart my-app
+shipyard restart <service>
 ```
 
----
-
-## 📄 View logs
+### View logs
 
 ```bash
-shipyard logs my-app
+shipyard logs <service>
 ```
 
----
-
-## 🗑️ Delete service (safe)
+### Update a service
 
 ```bash
-shipyard delete my-app
+shipyard update <service>
 ```
 
----
+### Delete a service
 
-## 🧹 Cleanup orphan services
+```bash
+shipyard delete <service>
+```
+
+### Cleanup unused resources
 
 ```bash
 shipyard cleanup
@@ -147,26 +144,75 @@ shipyard cleanup
 
 ---
 
-# 🧠 Architecture
+## Architecture
 
 ```
-GitHub Repo → Buildx → GHCR → Docker Compose → Deploy
-```
-
-or
-
-```
-Docker Image → Pull → Docker Compose → Deploy
-```
-
-State stored in:
-
-```
-~/.shipyard/state.yaml
+shipyard/
+├── cmd/
+├── internal/
+│   ├── compose/
+│   ├── config/
+│   ├── docker/
+│   ├── git/
+│   ├── state/
+│   └── ui/
+├── .github/
+├── main.go
+├── install.sh
+├── Makefile
+└── README.md
 ```
 
 ---
 
-# ⚠️ Disclaimer
+## Supported platforms
 
-Designed for homelab / personal infrastructure use.
+* Linux (amd64)
+* Linux (arm64)
+
+---
+
+## Releases
+
+Shipyard uses GitHub Actions to build binaries automatically.
+
+Create a new release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Artifacts:
+
+* shipyard-linux-amd64
+* shipyard-linux-arm64
+
+---
+
+## Roadmap
+
+* Watch mode (auto redeploy on changes)
+* Remote deployments (SSH / API)
+* Environment file support (.env templates)
+* Rollback system
+* Stable / beta release channels
+
+---
+
+## Contributing
+
+Contributions are welcome.
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit changes
+4. Open a pull request
+
+Keep changes focused and consistent with the CLI design.
+
+---
+
+## License
+
+MIT
