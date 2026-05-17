@@ -209,6 +209,30 @@ func CheckFail(name, detail string) {
 }
 
 // ---------------------------------------------------------------------------
+// Public color helper
+// ---------------------------------------------------------------------------
+
+// Colorize wraps s with the named ANSI color for inline use in Detail values
+// or custom output. Supported names: red, green, yellow, cyan, blue, dim, bold.
+// Returns s unchanged when color is disabled.
+func Colorize(name, s string) string {
+	codes := map[string]string{
+		"red":    red,
+		"green":  green,
+		"yellow": yellow,
+		"cyan":   cyan,
+		"blue":   blue,
+		"dim":    dim,
+		"bold":   bold,
+	}
+	code, ok := codes[name]
+	if !ok {
+		return s
+	}
+	return colorize(code, s)
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
