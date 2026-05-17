@@ -1,30 +1,32 @@
 package cmd
 
 import (
-	"fmt"
+	"os/exec"
 
-	"shipyard/internal/system"
+	"shipyard/internal/ui"
 
 	"github.com/spf13/cobra"
 )
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Verifica dependencias del sistema",
+	Short: "Check system dependencies",
 	Run: func(cmd *cobra.Command, args []string) {
 
-		check("git")
-		check("docker")
-		check("ssh")
+		ui.Section("doctor")
+		checkDep("git")
+		checkDep("docker")
+		checkDep("ssh")
 	},
 }
 
-func check(name string) {
-	err := system.CheckCommand(name)
+// checkDep verifies that a binary is reachable in PATH and prints the result.
+func checkDep(name string) {
+	path, err := exec.LookPath(name)
 	if err != nil {
-		fmt.Printf("❌ %s\n", err)
+		ui.CheckFail(name, "not found in PATH")
 	} else {
-		fmt.Printf("✅ %s instalado\n", name)
+		ui.CheckOk(name, path)
 	}
 }
 

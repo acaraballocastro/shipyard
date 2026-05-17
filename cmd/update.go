@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"fmt"
-
+	"shipyard/internal/ui"
 	shipyardUpdate "shipyard/internal/update"
 
 	"github.com/spf13/cobra"
@@ -10,22 +9,21 @@ import (
 
 var updateCmd = &cobra.Command{
 	Use:   "update [app]",
-	Short: "Actualiza una aplicación desplegada",
+	Short: "Rebuild and redeploy a running service",
 	Args:  cobra.ExactArgs(1),
 
 	Run: func(cmd *cobra.Command, args []string) {
 
 		appName := args[0]
 
-		fmt.Println("🔄 Shipyard update:", appName)
+		ui.Section("update")
+		ui.Info("updating %s", appName)
 
-		err := shipyardUpdate.Run(appName)
-		if err != nil {
-			fmt.Println("❌ Error:", err)
-			return
+		if err := shipyardUpdate.Run(appName); err != nil {
+			ui.Fatal("%s", err)
 		}
 
-		fmt.Println("✅ Update completado")
+		ui.Ok("%s updated", appName)
 	},
 }
 

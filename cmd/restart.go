@@ -1,17 +1,18 @@
 package cmd
 
 import (
-	"fmt"
+	"os"
 	"os/exec"
 
 	"shipyard/internal/state"
+	"shipyard/internal/ui"
 
 	"github.com/spf13/cobra"
 )
 
 var restartCmd = &cobra.Command{
 	Use:   "restart [app]",
-	Short: "Reinicia un servicio desplegado",
+	Short: "Restart a deployed service",
 	Args:  cobra.ExactArgs(1),
 
 	Run: func(cmd *cobra.Command, args []string) {
@@ -20,35 +21,30 @@ var restartCmd = &cobra.Command{
 
 		st, err := state.Load()
 		if err != nil {
-			fmt.Println("❌ Error cargando state:", err)
-			return
+			ui.Fatal("state: %s", err)
 		}
 
 		app, exists := st.Apps[appName]
 		if !exists {
-			fmt.Println("❌ App no encontrada:", appName)
-			return
+			ui.Fatal("app not found: %s", appName)
 		}
 
-		fmt.Println("🔄 Reiniciando:", appName)
+		ui.Step("restart", "restarting %s", appName)
 
 		cmdExec := exec.Command(
-			"docker",
-			"compose",
-			"-f",
-			app.Path+"/docker-compose.yml",
+			"docker", "compose",
+			"-f", app.Path+"/docker-compose.yml",
 			"restart",
 		)
 
-		cmdExec.Stdout = nil
-		cmdExec.Stderr = nil
+		cmdExec.Stdout = os.Stdout
+		cmdExec.Stderr = os.Stderr
 
 		if err := cmdExec.Run(); err != nil {
-			fmt.Println("❌ Error reiniciando:", err)
-			return
+			ui.Fatal("docker compose restart: %s", err)
 		}
 
-		fmt.Println("✅ Restart completado")
+		ui.Ok("%s restarted", appName)
 	},
 }
 

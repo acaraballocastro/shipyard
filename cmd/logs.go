@@ -1,17 +1,18 @@
 package cmd
 
 import (
-	"fmt"
+	"os"
 	"os/exec"
 
 	"shipyard/internal/state"
+	"shipyard/internal/ui"
 
 	"github.com/spf13/cobra"
 )
 
 var logsCmd = &cobra.Command{
 	Use:   "logs [app]",
-	Short: "Muestra logs de un servicio",
+	Short: "Stream logs from a deployed service",
 	Args:  cobra.ExactArgs(1),
 
 	Run: func(cmd *cobra.Command, args []string) {
@@ -20,33 +21,27 @@ var logsCmd = &cobra.Command{
 
 		st, err := state.Load()
 		if err != nil {
-			fmt.Println("❌ Error cargando state:", err)
-			return
+			ui.Fatal("state: %s", err)
 		}
 
 		app, exists := st.Apps[appName]
 		if !exists {
-			fmt.Println("❌ App no encontrada:", appName)
-			return
+			ui.Fatal("app not found: %s", appName)
 		}
 
-		fmt.Println("📜 Logs de:", appName)
+		ui.Info("streaming logs for %s", appName)
 
 		cmdExec := exec.Command(
-			"docker",
-			"compose",
-			"-f",
-			app.Path+"/docker-compose.yml",
-			"logs",
-			"-f",
+			"docker", "compose",
+			"-f", app.Path+"/docker-compose.yml",
+			"logs", "-f",
 		)
 
-		cmdExec.Stdout = nil
-		cmdExec.Stderr = nil
+		cmdExec.Stdout = os.Stdout
+		cmdExec.Stderr = os.Stderr
 
 		if err := cmdExec.Run(); err != nil {
-			fmt.Println("❌ Error mostrando logs:", err)
-			return
+			ui.Fatal("docker compose logs: %s", err)
 		}
 	},
 }

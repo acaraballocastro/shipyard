@@ -1,20 +1,21 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
+
+	"shipyard/internal/ui"
 
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "shipyard",
-	Short: "Shipyard CLI - Deploy apps fácilmente con Docker",
+	Short: "Lightweight deployment CLI for Docker and homelab servers",
 }
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+		ui.Fatal("%s", err)
 		os.Exit(1)
 	}
 }

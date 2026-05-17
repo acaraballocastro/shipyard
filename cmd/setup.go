@@ -7,48 +7,46 @@ import (
 	"strings"
 
 	"shipyard/internal/config"
+	"shipyard/internal/ui"
 
 	"github.com/spf13/cobra"
 )
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Configura Shipyard por primera vez",
+	Short: "Configure Shipyard for first use",
 	Run: func(cmd *cobra.Command, args []string) {
+
+		ui.Section("setup")
 
 		reader := bufio.NewReader(os.Stdin)
 
-		fmt.Print("GitHub user: ")
-		githubUser, _ := reader.ReadString('\n')
+		prompt := func(label string) string {
+			fmt.Fprintf(os.Stdout, "  %-20s", label+": ")
+			val, _ := reader.ReadString('\n')
+			return strings.TrimSpace(val)
+		}
 
-		fmt.Print("GitHub token: ")
-		githubToken, _ := reader.ReadString('\n')
-
-		fmt.Print("Raspberry host (IP): ")
-		host, _ := reader.ReadString('\n')
-
-		fmt.Print("SSH user: ")
-		user, _ := reader.ReadString('\n')
-
-		fmt.Print("SSH key path (~/.ssh/id_rsa): ")
-		sshKey, _ := reader.ReadString('\n')
+		githubUser := prompt("GitHub user")
+		githubToken := prompt("GitHub token")
+		host := prompt("device host (IP)")
+		user := prompt("SSH user")
+		sshKey := prompt("SSH key path")
 
 		cfg := &config.Config{
-			GitHubUser:  strings.TrimSpace(githubUser),
-			GitHubToken: strings.TrimSpace(githubToken),
+			GitHubUser:  githubUser,
+			GitHubToken: githubToken,
 		}
 
-		cfg.Device.Host = strings.TrimSpace(host)
-		cfg.Device.User = strings.TrimSpace(user)
-		cfg.Device.SSHKey = strings.TrimSpace(sshKey)
+		cfg.Device.Host = host
+		cfg.Device.User = user
+		cfg.Device.SSHKey = sshKey
 
-		err := config.Save(cfg)
-		if err != nil {
-			fmt.Println("❌ Error guardando config:", err)
-			return
+		if err := config.Save(cfg); err != nil {
+			ui.Fatal("saving config: %s", err)
 		}
 
-		fmt.Println("✅ Configuración guardada en ~/.shipyard.yaml")
+		ui.Ok("configuration saved to ~/.shipyard.yaml")
 	},
 }
 

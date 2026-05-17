@@ -11,23 +11,17 @@ type CommitResponse struct {
 }
 
 func GetLatestCommit(repo string) (string, error) {
-
-	url := fmt.Sprintf(
-		"https://api.github.com/repos/%s/commits/main",
-		repo,
-	)
+	url := fmt.Sprintf("https://api.github.com/repos/%s/commits/main", repo)
 
 	resp, err := http.Get(url)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("fetching commits for %s: %w", repo, err)
 	}
 	defer resp.Body.Close()
 
 	var data CommitResponse
-
-	err = json.NewDecoder(resp.Body).Decode(&data)
-	if err != nil {
-		return "", err
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", fmt.Errorf("decoding response: %w", err)
 	}
 
 	return data.SHA, nil

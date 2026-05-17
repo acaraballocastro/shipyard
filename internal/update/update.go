@@ -6,6 +6,7 @@ import (
 	"shipyard/internal/docker"
 	"shipyard/internal/git"
 	"shipyard/internal/state"
+	"shipyard/internal/ui"
 )
 
 func Run(appName string) error {
@@ -16,45 +17,43 @@ func Run(appName string) error {
 
 	st, err := state.Load()
 	if err != nil {
-		return fmt.Errorf("error cargando state: %w", err)
+		return fmt.Errorf("state: %w", err)
 	}
 
 	app, exists := st.Apps[appName]
 	if !exists {
-		return fmt.Errorf("app no encontrada: %s", appName)
+		return fmt.Errorf("app not found: %s", appName)
 	}
 
 	// =========================
 	// CLONE REPO
 	// =========================
 
-	fmt.Println("📥 Clonando repo...")
+	ui.Step("clone", "cloning %s", app.Repo)
 
 	dir, err := git.Clone(app.Repo)
 	if err != nil {
-		return fmt.Errorf("error clonando repo: %w", err)
+		return fmt.Errorf("git clone: %w", err)
 	}
 
 	// =========================
 	// BUILD + PUSH
 	// =========================
 
-	fmt.Println("🐳 Build y push imagen...")
+	ui.Step("build", "building and pushing image")
 
-	err = docker.BuildAndPush(app.Image, dir)
-	if err != nil {
-		return fmt.Errorf("error build/push: %w", err)
+	if err := docker.BuildAndPush(app.Image, dir); err != nil {
+		return fmt.Errorf("build: %w", err)
 	}
 
 	// =========================
 	// REDEPLOY
 	// =========================
 
-	fmt.Println("🚀 Redeploy compose...")
+	ui.Step("up", "redeploying %s", appName)
 
-	err = docker.ComposeUp(app.Path)
-	if err != nil {
-		return fmt.Errorf("error compose up: %w", err)
+	if err := docker.ComposeUp(app.Path); err != nil {
+		return fmt.Errorf("compose up: %w", err)
 	}
 
 	return nil

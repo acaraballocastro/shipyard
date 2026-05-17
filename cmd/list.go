@@ -1,29 +1,34 @@
 package cmd
 
 import (
-	"fmt"
-
 	"shipyard/internal/state"
+	"shipyard/internal/ui"
 
 	"github.com/spf13/cobra"
 )
 
 var listCmd = &cobra.Command{
-	Use: "list",
+	Use:   "list",
+	Short: "List deployed applications",
 	Run: func(cmd *cobra.Command, args []string) {
 
-		st, _ := state.Load()
+		st, err := state.Load()
+		if err != nil {
+			ui.Fatal("state: %s", err)
+		}
 
-		fmt.Println("📦 Apps desplegadas:")
+		headers := []string{"name", "image", "mode", "domain", "path"}
+		rows := make([][]string, 0, len(st.Apps))
 
 		for name, app := range st.Apps {
-			fmt.Println("─")
-			fmt.Println("Name:", name)
-			fmt.Println("Repo:", app.Repo)
-			fmt.Println("Image:", app.Image)
-			fmt.Println("Mode:", app.Mode)
-			fmt.Println("Path:", app.Path)
+			domain := app.Domain
+			if domain == "" {
+				domain = "-"
+			}
+			rows = append(rows, []string{name, app.Image, app.Mode, domain, app.Path})
 		}
+
+		ui.Table(headers, rows)
 	},
 }
 

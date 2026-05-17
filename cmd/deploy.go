@@ -9,6 +9,7 @@ import (
 	"shipyard/internal/docker"
 	"shipyard/internal/git"
 	"shipyard/internal/state"
+	"shipyard/internal/ui"
 
 	"github.com/spf13/cobra"
 )
@@ -27,10 +28,16 @@ var createNetwork bool
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
-	Short: "Deploy desde repo GitHub o imagen Docker",
+	Short: "Deploy from a GitHub repo or Docker image",
 	Run: func(cmd *cobra.Command, args []string) {
 
-		fmt.Println("🚀 Shipyard deploy iniciado")
+		// =========================
+		// VALIDATION
+		// =========================
+
+		if repo == "" && image == "" {
+			ui.Fatal("specify --repo or --image")
+		}
 
 		// =========================
 		// CONFIG
@@ -38,21 +45,13 @@ var deployCmd = &cobra.Command{
 
 		cfg, err := config.Load()
 		if err != nil {
-			fmt.Println("❌ config error:", err)
-			return
+			ui.Fatal("config: %s", err)
 		}
 
-		// =========================
-		// VALIDACIÓN
-		// =========================
-
-		if repo == "" && image == "" {
-			fmt.Println("❌ Debes indicar --repo o --image")
-			return
-		}
+		ui.Section("deploy")
 
 		// =========================
-		// RESOLVER ORIGEN
+		// RESOLVE SOURCE
 		// =========================
 
 		isImage := image != "" && repo == ""
@@ -65,9 +64,7 @@ var deployCmd = &cobra.Command{
 		// =========================
 
 		if isImage {
-
-			fmt.Println("📦 Modo image:", image)
-
+			ui.Info("mode image: %s", image)
 			serviceName = docker.AdvancedNormalizeName(image)
 			finalImage = image
 		}
@@ -77,7 +74,6 @@ var deployCmd = &cobra.Command{
 		// =========================
 
 		if repo != "" {
-
 			if image == "" {
 				image = git.ExtractRepoName(repo)
 			}
@@ -85,19 +81,19 @@ var deployCmd = &cobra.Command{
 			serviceName = docker.NormalizeName(image)
 			finalImage = fmt.Sprintf("ghcr.io/%s/%s", cfg.GitHubUser, serviceName)
 
-			fmt.Println("📦 Repo:", repo)
-			fmt.Println("🐳 Image:", finalImage)
+			ui.Info("mode repo: %s", repo)
+			ui.Detail("image", finalImage)
 
+			ui.Step("clone", "cloning %s", repo)
 			dir, err := git.Clone(repo)
 			if err != nil {
-				fmt.Println("❌ git clone error:", err)
-				return
+				ui.Fatal("git clone: %s", err)
 			}
 
+			ui.Step("build", "building linux/arm64 image")
 			err = docker.BuildAndPush(finalImage, dir)
 			if err != nil {
-				fmt.Println("❌ build error:", err)
-				return
+				ui.Fatal("build: %s", err)
 			}
 		}
 
@@ -107,7 +103,7 @@ var deployCmd = &cobra.Command{
 
 		if network != "" && createNetwork {
 			if !docker.NetworkExists(network) {
-				fmt.Println("🌐 creando network:", network)
+				ui.Step("network", "creating %s", network)
 				_ = docker.CreateNetwork(network)
 			}
 		}
@@ -116,6 +112,7 @@ var deployCmd = &cobra.Command{
 		// COMPOSE GENERATION
 		// =========================
 
+		ui.Step("compose", "generating docker-compose.yaml")
 		err = compose.Generate(
 			composePath,
 			serviceName,
@@ -127,22 +124,28 @@ var deployCmd = &cobra.Command{
 			ports,
 			volumes,
 		)
-
 		if err != nil {
-			fmt.Println("❌ compose error:", err)
-			return
+			ui.Fatal("compose: %s", err)
+		}
+
+		composeFilePath := filepath.Join(composePath, serviceName)
+		ui.Detail("path", composeFilePath)
+
+		if network != "" {
+			ui.Detail("network", network)
+		}
+		if domain != "" {
+			ui.Detail("domain", domain)
 		}
 
 		// =========================
 		// DEPLOY
 		// =========================
 
-		composeFilePath := filepath.Join(composePath, serviceName)
-
+		ui.Step("up", "starting service")
 		err = docker.ComposeUp(composeFilePath)
 		if err != nil {
-			fmt.Println("❌ deploy error:", err)
-			return
+			ui.Fatal("deploy: %s", err)
 		}
 
 		// =========================
@@ -162,7 +165,7 @@ var deployCmd = &cobra.Command{
 			_ = state.Save(st)
 		}
 
-		fmt.Println("✅ Servicio desplegado correctamente:", serviceName)
+		ui.Ok("%s deployed", serviceName)
 	},
 }
 
@@ -170,15 +173,15 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 
 	deployCmd.Flags().StringVar(&repo, "repo", "", "GitHub repo (user/repo)")
-	deployCmd.Flags().StringVar(&image, "image", "", "Docker image (ej: traefik/whoami)")
+	deployCmd.Flags().StringVar(&image, "image", "", "Docker image (e.g. traefik/whoami)")
 
-	deployCmd.Flags().StringSliceVar(&ports, "port", []string{}, "Puertos")
-	deployCmd.Flags().StringSliceVar(&volumes, "volume", []string{}, "Volúmenes")
+	deployCmd.Flags().StringSliceVar(&ports, "port", []string{}, "Port mappings")
+	deployCmd.Flags().StringSliceVar(&volumes, "volume", []string{}, "Volume mounts")
 
-	deployCmd.Flags().StringVar(&composePath, "compose-path", "/srv/apps", "Base path")
-	deployCmd.Flags().StringVar(&mode, "mode", "local", "local | traefik")
+	deployCmd.Flags().StringVar(&composePath, "compose-path", "/srv/apps", "Base path for compose files")
+	deployCmd.Flags().StringVar(&mode, "mode", "local", "Deployment mode: local | traefik")
 	deployCmd.Flags().StringVar(&domain, "domain", "", "Traefik domain")
 	deployCmd.Flags().StringVar(&network, "network", "", "Docker network")
-	deployCmd.Flags().BoolVar(&createNetwork, "create-network", false, "Create network if missing")
+	deployCmd.Flags().BoolVar(&createNetwork, "create-network", false, "Create network if it does not exist")
 	deployCmd.Flags().StringVar(&internalPort, "internal-port", "80", "Internal container port")
 }
