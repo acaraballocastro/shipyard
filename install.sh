@@ -2,8 +2,7 @@
 
 set -e
 
-VERSION="latest"
-REPO="TU_USER/shipyard"
+REPO="acaraballocastro/shipyard"
 
 ARCH=$(uname -m)
 
@@ -24,7 +23,7 @@ curl -L $URL -o shipyard
 
 chmod +x shipyard
 
-echo "📦 Installing to /usr/local/bin..."
+echo "📦 Installing Shipyard..."
 
 sudo mv shipyard /usr/local/bin/shipyard
 
