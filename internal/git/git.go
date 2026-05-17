@@ -9,12 +9,15 @@ import (
 
 func Clone(repo string) (string, error) {
 	url := fmt.Sprintf("git@github.com:%s.git", repo)
+
 	dir := "/srv/repos/" + repo
 
+	// limpiar si existe
 	os.RemoveAll(dir)
 
-	if err := system.RunCommand("git", "clone", url, dir); err != nil {
-		return "", fmt.Errorf("cloning %s: %w", repo, err)
+	err := system.RunCommand("git", "clone", url, dir)
+	if err != nil {
+		return "", err
 	}
 
 	return dir, nil
