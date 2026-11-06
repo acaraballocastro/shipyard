@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"shipyard/internal/deployment"
 	"shipyard/internal/state"
 	"shipyard/internal/ui"
 
@@ -20,6 +21,10 @@ type dockerInspect struct {
 		Status    string `json:"Status"`
 		Running   bool   `json:"Running"`
 		StartedAt string `json:"StartedAt"`
+		Health    *struct {
+			Status        string `json:"Status"`
+			FailingStreak int    `json:"FailingStreak"`
+		} `json:"Health"`
 	} `json:"State"`
 	NetworkSettings struct {
 		Ports map[string][]struct {
@@ -67,7 +72,7 @@ var statusCmd = &cobra.Command{
 		inspectOut, err := exec.Command(
 			"docker", "inspect",
 			"--format", "{{json .}}",
-			appName,
+			"--", appName,
 		).Output()
 
 		if err != nil {
@@ -138,6 +143,20 @@ var statusCmd = &cobra.Command{
 		fmt.Println()
 		ui.Detail("app", appName)
 		ui.Detail("status", statusLabel)
+		if h := inspect.State.Health; h != nil {
+			health := h.Status
+			switch h.Status {
+			case "healthy":
+				health = ui.Colorize("green", health)
+			case "unhealthy":
+				health = ui.Colorize("red", fmt.Sprintf("%s (failing streak %d)", health, h.FailingStreak))
+			default:
+				health = ui.Colorize("yellow", health)
+			}
+			ui.Detail("health", health)
+		} else {
+			ui.Detail("health", "no healthcheck")
+		}
 		ui.Detail("uptime", uptime)
 		ui.Detail("image", app.Image)
 		ui.Detail("mode", app.Mode)
@@ -147,6 +166,29 @@ var statusCmd = &cobra.Command{
 		}
 		if app.Network != "" {
 			ui.Detail("network", app.Network)
+		}
+
+		// Settings from deployment.yaml (never values of env vars).
+		if cfg, err := deployment.Load(app.Path); err == nil {
+			ui.Detail("source", cfg.Source.Type)
+			if cfg.Build.Platform != "" {
+				ui.Detail("platform", cfg.Build.Platform)
+			}
+			if cfg.Deploy.Mode == deployment.ModeTraefik {
+				ep := cfg.Deploy.Entrypoint
+				if cfg.Deploy.TLS {
+					ep += " (tls)"
+				}
+				ui.Detail("entrypoint", ep)
+			}
+			if len(cfg.Env.Files) > 0 {
+				ui.Detail("env files", strings.Join(cfg.Env.Files, ", "))
+			}
+			if len(cfg.Env.Keys) > 0 {
+				ui.Detail("env keys", strings.Join(cfg.Env.Keys, ", "))
+			}
+		} else {
+			ui.Detail("config", "no deployment.yaml (run shipyard update to migrate)")
 		}
 		if len(portList) > 0 {
 			ui.Detail("ports", strings.Join(portList, ", "))

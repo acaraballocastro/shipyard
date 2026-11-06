@@ -31,6 +31,11 @@ var watchCmd = &cobra.Command{
 			}
 
 			for name, app := range st.Apps {
+				// image-based deployments have no repository to poll
+				if app.Repo == "" {
+					continue
+				}
+
 				ui.Info("checking %s", name)
 
 				latest, err := git.GetLatestCommit(app.Repo)

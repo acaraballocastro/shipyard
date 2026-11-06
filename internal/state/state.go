@@ -34,8 +34,13 @@ func Load() (*State, error) {
 	}
 
 	var s State
-	err = yaml.Unmarshal(data, &s)
-	return &s, err
+	if err := yaml.Unmarshal(data, &s); err != nil {
+		return nil, err
+	}
+	if s.Apps == nil {
+		s.Apps = map[string]App{}
+	}
+	return &s, nil
 }
 
 func Save(s *State) error {
