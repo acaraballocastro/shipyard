@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"shipyard/internal/core"
 	"shipyard/internal/remote"
 	"shipyard/internal/ui"
 
@@ -28,7 +29,7 @@ func deployRemote(t target, cmd *cobra.Command) {
 	ui.Section("deploy")
 	ui.Info("target %s (%s), building on the server", ui.Colorize("bold", t.Name), host)
 
-	if _, err := ParseEnvVars(envVars); err != nil {
+	if _, err := core.ParseEnvVars(envVars); err != nil {
 		ui.Fatal("%s", err)
 	}
 

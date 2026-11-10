@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	"shipyard/internal/core"
 	"shipyard/internal/git"
 	"shipyard/internal/state"
 	"shipyard/internal/ui"
-	shipyardUpdate "shipyard/internal/update"
 
 	"github.com/spf13/cobra"
 )
@@ -21,6 +21,7 @@ var watchCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 
 		ui.Info("watch started, polling every %d minute(s)", interval)
+		svc := core.New()
 
 		for {
 			st, err := state.Load()
@@ -60,7 +61,7 @@ var watchCmd = &cobra.Command{
 				// new commit detected
 				ui.Step("deploy", "%s — new commit %s", name, fmt.Sprintf("%.8s", latest))
 
-				if err := shipyardUpdate.Run(name); err != nil {
+				if err := svc.Update(cmd.Context(), name, ui.Progress()); err != nil {
 					ui.Error("%s: update: %s", name, err)
 					continue
 				}

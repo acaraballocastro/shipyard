@@ -1,12 +1,17 @@
 package docker
 
-import "shipyard/internal/system"
+import (
+	"context"
+	"io"
+	"os/exec"
+
+	"shipyard/internal/system"
+)
 
 func NetworkExists(name string) bool {
-	err := system.RunCommand("docker", "network", "inspect", name)
-	return err == nil
+	return exec.Command("docker", "network", "inspect", "--", name).Run() == nil
 }
 
-func CreateNetwork(name string) error {
-	return system.RunCommand("docker", "network", "create", name)
+func CreateNetwork(ctx context.Context, name string, out io.Writer) error {
+	return system.Run(ctx, out, "docker", "network", "create", name)
 }

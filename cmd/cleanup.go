@@ -1,10 +1,7 @@
 package cmd
 
 import (
-	"os"
-	"path/filepath"
-
-	"shipyard/internal/state"
+	"shipyard/internal/core"
 	"shipyard/internal/ui"
 
 	"github.com/spf13/cobra"
@@ -23,55 +20,11 @@ var cleanupCmd = &cobra.Command{
 
 		ui.Section("cleanup")
 
-		// =========================
-		// LOAD STATE
-		// =========================
-
-		st, err := state.Load()
+		removed, err := core.New().Cleanup(composeBase, ui.Progress())
 		if err != nil {
-			ui.Fatal("state: %s", err)
+			ui.Error("%s", err)
 		}
-
-		// =========================
-		// READ DIRECTORY
-		// =========================
-
-		entries, err := os.ReadDir(composeBase)
-		if err != nil {
-			ui.Fatal("reading %s: %s", composeBase, err)
-		}
-
-		// =========================
-		// CHECK ORPHANS
-		// =========================
-
-		found := 0
-
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-
-			name := e.Name()
-			if _, exists := st.Apps[name]; exists {
-				continue
-			}
-
-			found++
-			path := filepath.Join(composeBase, name)
-
-			ui.Step("remove", "%s", name)
-			ui.Detail("path", path)
-
-			if err := os.RemoveAll(path); err != nil {
-				ui.Error("removing %s: %s", name, err)
-				continue
-			}
-
-			ui.Ok("%s removed", name)
-		}
-
-		if found == 0 {
+		if len(removed) == 0 && err == nil {
 			ui.Info("no orphans found")
 		}
 	},
@@ -80,10 +33,5 @@ var cleanupCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(cleanupCmd)
 
-	cleanupCmd.Flags().StringVar(
-		&composeBase,
-		"compose-path",
-		"/srv/apps",
-		"Base directory for deployed apps",
-	)
+	cleanupCmd.Flags().StringVar(&composeBase, "compose-path", core.DefaultRoot, "Base directory for deployed apps")
 }

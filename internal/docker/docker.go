@@ -1,7 +1,9 @@
 package docker
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -47,19 +49,14 @@ func BuildArgs(image, path string, opts BuildOptions) []string {
 	return append(args, "-t", fmt.Sprintf("%s:latest", image), "--push", path)
 }
 
-// BuildAndPush builds for the default platform (linux/arm64) and pushes.
-func BuildAndPush(image string, path string) error {
-	return BuildAndPushWith(image, path, BuildOptions{})
-}
-
 // BuildAndPushWith builds with the given options and pushes the image.
-func BuildAndPushWith(image string, path string, opts BuildOptions) error {
+func BuildAndPushWith(ctx context.Context, image string, path string, opts BuildOptions, out io.Writer) error {
 	for _, k := range opts.ArgsFromEnv {
 		if _, ok := os.LookupEnv(k); !ok {
 			return fmt.Errorf("build arg %s: not set in the environment", k)
 		}
 	}
-	return system.RunCommand("docker", BuildArgs(image, path, opts)...)
+	return system.Run(ctx, out, "docker", BuildArgs(image, path, opts)...)
 }
 
 func Push(image string, tag string) error {

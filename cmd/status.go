@@ -1,44 +1,16 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
+	"shipyard/internal/core"
 	"shipyard/internal/deployment"
-	"shipyard/internal/state"
 	"shipyard/internal/ui"
 
 	"github.com/spf13/cobra"
 )
-
-// dockerInspect mirrors the fields we need from `docker inspect`.
-type dockerInspect struct {
-	State struct {
-		Status    string `json:"Status"`
-		Running   bool   `json:"Running"`
-		StartedAt string `json:"StartedAt"`
-		Health    *struct {
-			Status        string `json:"Status"`
-			FailingStreak int    `json:"FailingStreak"`
-		} `json:"Health"`
-	} `json:"State"`
-	NetworkSettings struct {
-		Ports map[string][]struct {
-			HostIP   string `json:"HostIp"`
-			HostPort string `json:"HostPort"`
-		} `json:"Ports"`
-	} `json:"NetworkSettings"`
-}
-
-// dockerStats mirrors the fields we need from `docker stats --no-stream`.
-type dockerStats struct {
-	MemUsage string `json:"MemUsage"`
-	CPUPerc  string `json:"CPUPerc"`
-}
 
 var statusCmd = &cobra.Command{
 	Use:   "status [app]",
@@ -46,130 +18,57 @@ var statusCmd = &cobra.Command{
 	Args:  appArg,
 
 	Run: func(cmd *cobra.Command, args []string) {
-
 		appName := resolveApp(cmd, args, "Show status of which service?")
 
-		// =========================
-		// LOAD STATE
-		// =========================
-
-		st, err := state.Load()
+		s, err := core.New().Status(cmd.Context(), appName)
 		if err != nil {
-			ui.Fatal("state: %s", err)
-		}
-
-		app, exists := st.Apps[appName]
-		if !exists {
-			ui.Fatal("app not found: %s", appName)
+			ui.Fatal("%s", err)
 		}
 
 		ui.Section("status")
 
-		// =========================
-		// DOCKER INSPECT
-		// =========================
-
-		inspectOut, err := exec.Command(
-			"docker", "inspect",
-			"--format", "{{json .}}",
-			"--", appName,
-		).Output()
-
-		if err != nil {
+		if !s.Container {
 			ui.Error("container not found — is it running?")
-			ui.Detail("app", appName)
-			ui.Detail("path", app.Path)
-			ui.Detail("image", app.Image)
+			ui.Detail("app", s.Name)
+			ui.Detail("path", s.Path)
+			ui.Detail("image", s.Image)
 			return
 		}
 
-		var inspect dockerInspect
-		if err := json.Unmarshal(inspectOut, &inspect); err != nil {
-			ui.Fatal("parsing inspect output: %s", err)
+		statusLabel := ui.Colorize("red", s.State)
+		if s.Running {
+			statusLabel = ui.Colorize("green", s.State)
 		}
-
-		// =========================
-		// DOCKER STATS
-		// =========================
-
-		statsOut, err := exec.Command(
-			"docker", "stats",
-			"--no-stream",
-			"--format", `{"CPUPerc":"{{.CPUPerc}}","MemUsage":"{{.MemUsage}}"}`,
-			appName,
-		).Output()
-
-		var stats dockerStats
-		if err == nil {
-			_ = json.Unmarshal(statsOut, &stats)
-		}
-
-		// =========================
-		// FORMAT UPTIME
-		// =========================
-
 		uptime := "-"
-		if inspect.State.Running {
-			t, err := time.Parse(time.RFC3339Nano, inspect.State.StartedAt)
-			if err == nil {
-				uptime = formatDuration(time.Since(t))
-			}
-		}
-
-		// =========================
-		// FORMAT PORTS
-		// =========================
-
-		portList := []string{}
-		for containerPort, bindings := range inspect.NetworkSettings.Ports {
-			for _, b := range bindings {
-				if b.HostPort != "" {
-					portList = append(portList, fmt.Sprintf("%s -> %s", b.HostPort, containerPort))
-				}
-			}
-		}
-
-		// =========================
-		// PRINT
-		// =========================
-
-		statusLabel := inspect.State.Status
-		if inspect.State.Running {
-			statusLabel = ui.Colorize("green", statusLabel)
-		} else {
-			statusLabel = ui.Colorize("red", statusLabel)
+		if s.StartedAt != nil {
+			uptime = core.FormatDuration(time.Since(*s.StartedAt))
 		}
 
 		fmt.Println()
-		ui.Detail("app", appName)
+		ui.Detail("app", s.Name)
 		ui.Detail("status", statusLabel)
-		if h := inspect.State.Health; h != nil {
-			health := h.Status
-			switch h.Status {
-			case "healthy":
-				health = ui.Colorize("green", health)
-			case "unhealthy":
-				health = ui.Colorize("red", fmt.Sprintf("%s (failing streak %d)", health, h.FailingStreak))
-			default:
-				health = ui.Colorize("yellow", health)
-			}
-			ui.Detail("health", health)
-		} else {
+		switch s.Health {
+		case "":
 			ui.Detail("health", "no healthcheck")
+		case "healthy":
+			ui.Detail("health", ui.Colorize("green", s.Health))
+		case "unhealthy":
+			ui.Detail("health", ui.Colorize("red", fmt.Sprintf("%s (failing streak %d)", s.Health, s.FailingStreak)))
+		default:
+			ui.Detail("health", ui.Colorize("yellow", s.Health))
 		}
 		ui.Detail("uptime", uptime)
-		ui.Detail("image", app.Image)
-		ui.Detail("mode", app.Mode)
-
-		if app.Domain != "" {
-			ui.Detail("domain", app.Domain)
+		ui.Detail("image", s.Image)
+		ui.Detail("mode", s.Mode)
+		if s.Domain != "" {
+			ui.Detail("domain", s.Domain)
 		}
-		if app.Network != "" {
-			ui.Detail("network", app.Network)
+		if s.Network != "" {
+			ui.Detail("network", s.Network)
 		}
 
 		// Settings from deployment.yaml (never values of env vars).
-		if cfg, err := deployment.Load(app.Path); err == nil {
+		if cfg := s.Config; cfg != nil {
 			ui.Detail("source", cfg.Source.Type)
 			if cfg.Build.Platform != "" {
 				ui.Detail("platform", cfg.Build.Platform)
@@ -190,53 +89,20 @@ var statusCmd = &cobra.Command{
 		} else {
 			ui.Detail("config", "no deployment.yaml (run shipyard update to migrate)")
 		}
-		if len(portList) > 0 {
-			ui.Detail("ports", strings.Join(portList, ", "))
+		if len(s.Ports) > 0 {
+			ui.Detail("ports", strings.Join(s.Ports, ", "))
 		}
-		if stats.CPUPerc != "" {
-			ui.Detail("cpu", stats.CPUPerc)
+		if s.CPU != "" {
+			ui.Detail("cpu", s.CPU)
 		}
-		if stats.MemUsage != "" {
-			ui.Detail("mem", stats.MemUsage)
+		if s.Memory != "" {
+			ui.Detail("mem", s.Memory)
 		}
-
-		ui.Detail("path", app.Path)
+		ui.Detail("path", s.Path)
 		fmt.Println()
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(statusCmd)
-}
-
-// formatDuration converts a duration to a human-readable string.
-// Examples: "3d 2h", "45m 10s", "5h 30m"
-func formatDuration(d time.Duration) string {
-	d = d.Round(time.Second)
-
-	days := int(d.Hours()) / 24
-	hours := int(d.Hours()) % 24
-	minutes := int(d.Minutes()) % 60
-	seconds := int(d.Seconds()) % 60
-
-	parts := []string{}
-
-	if days > 0 {
-		parts = append(parts, strconv.Itoa(days)+"d")
-	}
-	if hours > 0 {
-		parts = append(parts, strconv.Itoa(hours)+"h")
-	}
-	if minutes > 0 && days == 0 {
-		parts = append(parts, strconv.Itoa(minutes)+"m")
-	}
-	if seconds > 0 && days == 0 && hours == 0 {
-		parts = append(parts, strconv.Itoa(seconds)+"s")
-	}
-
-	if len(parts) == 0 {
-		return "just started"
-	}
-
-	return strings.Join(parts, " ")
 }

@@ -1,7 +1,9 @@
 package update
 
 import (
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +14,8 @@ import (
 	"shipyard/internal/deployment"
 	"shipyard/internal/docker"
 	"shipyard/internal/envfile"
+	"shipyard/internal/events"
 	"shipyard/internal/state"
-	"shipyard/internal/ui"
 )
 
 type fake struct {
@@ -27,13 +29,16 @@ type fake struct {
 
 func (f *fake) runner() Runner {
 	return Runner{
-		Clone: func(repo string) (string, error) { f.clones++; return "/src/" + repo, nil },
-		Build: func(image, dir string, o docker.BuildOptions) error {
+		Clone: func(_ context.Context, repo string, _ io.Writer) (string, error) {
+			f.clones++
+			return "/src/" + repo, nil
+		},
+		Build: func(_ context.Context, image, dir string, o docker.BuildOptions, _ io.Writer) error {
 			f.builds++
 			f.lastBuild = o
 			return f.buildErr
 		},
-		ComposeUp: func(dir string) error {
+		ComposeUp: func(context.Context, string, io.Writer) error {
 			f.ups++
 			if f.upErr != nil {
 				err := f.upErr
@@ -48,7 +53,8 @@ func (f *fake) runner() Runner {
 	}
 }
 
-func init() { ui.SetOutput(new(strings.Builder)) }
+var ctx = context.Background()
+var quiet = events.Progress{}
 
 func gitCfg() *deployment.Config {
 	return &deployment.Config{
@@ -63,7 +69,7 @@ func gitCfg() *deployment.Config {
 func TestApplyGitBuildsWithPlatformAndArgs(t *testing.T) {
 	dir := t.TempDir()
 	f := &fake{ready: docker.ContainerState{Running: true}}
-	if _, err := f.runner().Apply(dir, gitCfg(), ApplyOptions{Build: true, SetEnv: map[string]string{"SECRET": "s3cr3t"}}); err != nil {
+	if _, err := f.runner().Apply(ctx, dir, gitCfg(), ApplyOptions{Build: true, SetEnv: map[string]string{"SECRET": "s3cr3t"}}, quiet); err != nil {
 		t.Fatal(err)
 	}
 	if f.clones != 1 || f.builds != 1 || f.ups != 1 {
@@ -92,7 +98,7 @@ func TestApplyImageSkipsBuild(t *testing.T) {
 	f := &fake{ready: docker.ContainerState{Running: true}}
 	cfg := &deployment.Config{Name: "nginx", Image: "nginx:alpine", Source: deployment.Source{Type: "image"},
 		Deploy: deployment.Deploy{Mode: "traefik", Domain: "n.example.com", InternalPort: "80"}}
-	if _, err := f.runner().Apply(t.TempDir(), cfg, ApplyOptions{Build: true}); err != nil {
+	if _, err := f.runner().Apply(ctx, t.TempDir(), cfg, ApplyOptions{Build: true}, quiet); err != nil {
 		t.Fatal(err)
 	}
 	if f.clones != 0 || f.builds != 0 || f.ups != 1 {
@@ -104,7 +110,7 @@ func TestApplyBuildFailureLeavesFilesUntouched(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte("original"), 0644)
 	f := &fake{buildErr: errors.New("boom")}
-	if _, err := f.runner().Apply(dir, gitCfg(), ApplyOptions{Build: true}); err == nil {
+	if _, err := f.runner().Apply(ctx, dir, gitCfg(), ApplyOptions{Build: true}, quiet); err == nil {
 		t.Fatal("expected error")
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, "docker-compose.yml"))
@@ -119,7 +125,7 @@ func TestApplyBuildFailureLeavesFilesUntouched(t *testing.T) {
 func TestApplyUpFailureRestoresPrevious(t *testing.T) {
 	dir := t.TempDir()
 	ok := &fake{ready: docker.ContainerState{Running: true}}
-	if _, err := ok.runner().Apply(dir, gitCfg(), ApplyOptions{Build: true}); err != nil {
+	if _, err := ok.runner().Apply(ctx, dir, gitCfg(), ApplyOptions{Build: true}, quiet); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(filepath.Join(dir, "docker-compose.yml"))
@@ -128,7 +134,7 @@ func TestApplyUpFailureRestoresPrevious(t *testing.T) {
 	changed := gitCfg()
 	changed.Deploy.InternalPort = "4000"
 	bad := &fake{upErr: errors.New("port in use"), upErrOnce: true}
-	_, err := bad.runner().Apply(dir, changed, ApplyOptions{Build: true, SetEnv: map[string]string{"A": "1"}})
+	_, err := bad.runner().Apply(ctx, dir, changed, ApplyOptions{Build: true, SetEnv: map[string]string{"A": "1"}}, quiet)
 	if err == nil || !strings.Contains(err.Error(), "restored") {
 		t.Fatalf("err = %v", err)
 	}
@@ -149,8 +155,8 @@ func TestApplyPreservesExistingEnv(t *testing.T) {
 	dir := t.TempDir()
 	f := &fake{ready: docker.ContainerState{Running: true}}
 	r := f.runner()
-	r.Apply(dir, gitCfg(), ApplyOptions{SetEnv: map[string]string{"A": "1", "B": "2"}})
-	if _, err := r.Apply(dir, gitCfg(), ApplyOptions{SetEnv: map[string]string{"B": "3"}}); err != nil {
+	r.Apply(ctx, dir, gitCfg(), ApplyOptions{SetEnv: map[string]string{"A": "1", "B": "2"}}, quiet)
+	if _, err := r.Apply(ctx, dir, gitCfg(), ApplyOptions{SetEnv: map[string]string{"B": "3"}}, quiet); err != nil {
 		t.Fatal(err)
 	}
 	vars, _ := envfile.Read(filepath.Join(dir, ".env"))
@@ -172,14 +178,14 @@ func TestUpdatePreservesConfiguration(t *testing.T) {
 
 	f := &fake{ready: docker.ContainerState{Running: true, Health: "healthy"}}
 	r := f.runner()
-	if _, err := r.Apply(dir, cfg, ApplyOptions{Build: true, SetEnv: map[string]string{"K": "v"}}); err != nil {
+	if _, err := r.Apply(ctx, dir, cfg, ApplyOptions{Build: true, SetEnv: map[string]string{"K": "v"}}, quiet); err != nil {
 		t.Fatal(err)
 	}
 	state.Save(&state.State{Apps: map[string]state.App{"inariweb": {Repo: "u/inariWeb", Image: cfg.Image, Mode: "traefik", Path: dir, LastCommit: "abc"}}})
 	before, _ := os.ReadFile(filepath.Join(dir, "deployment.yaml"))
 	beforeCompose, _ := os.ReadFile(filepath.Join(dir, "docker-compose.yml"))
 
-	if err := r.Update("inariweb"); err != nil {
+	if err := r.Update(ctx, "inariweb", quiet); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(filepath.Join(dir, "deployment.yaml"))
@@ -208,7 +214,7 @@ func TestUpdateMigratesLegacyImageDeployment(t *testing.T) {
 	state.Save(&state.State{Apps: map[string]state.App{"whoami": {Image: "traefik/whoami", Mode: "traefik", Domain: "w.example.com", Network: "edge", Path: filepath.Join(base, "whoami")}}})
 
 	f := &fake{ready: docker.ContainerState{Running: true}}
-	if err := f.runner().Update("whoami"); err != nil {
+	if err := f.runner().Update(ctx, "whoami", quiet); err != nil {
 		t.Fatal(err)
 	}
 	if f.clones != 0 || f.builds != 0 || f.ups != 1 {
@@ -222,7 +228,7 @@ func TestUpdateMigratesLegacyImageDeployment(t *testing.T) {
 
 func TestUpdateUnknownApp(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := (&fake{}).runner().Update("nope"); err == nil {
+	if err := (&fake{}).runner().Update(ctx, "nope", quiet); err == nil {
 		t.Fatal("expected error")
 	}
 }

@@ -2,8 +2,10 @@ package update
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,16 +15,16 @@ import (
 	"shipyard/internal/deployment"
 	"shipyard/internal/docker"
 	"shipyard/internal/envfile"
+	"shipyard/internal/events"
 	"shipyard/internal/git"
-	"shipyard/internal/ui"
 )
 
 // Runner holds the side-effecting operations of a deployment so that the
 // workflow can be tested without Docker or Git.
 type Runner struct {
-	Clone     func(repo string) (string, error)
-	Build     func(image, dir string, opts docker.BuildOptions) error
-	ComposeUp func(dir string) error
+	Clone     func(ctx context.Context, repo string, out io.Writer) (string, error)
+	Build     func(ctx context.Context, image, dir string, opts docker.BuildOptions, out io.Writer) error
+	ComposeUp func(ctx context.Context, dir string, out io.Writer) error
 	WaitReady func(name string, timeout time.Duration) (docker.ContainerState, error)
 }
 
@@ -51,7 +53,7 @@ type ApplyOptions struct {
 // verifying the service fails, the previous docker-compose.yml, .env and
 // deployment.yaml are restored and the previous configuration is started
 // again (best effort). Volumes are never removed.
-func (r Runner) Apply(dir string, cfg *deployment.Config, opts ApplyOptions) (docker.ContainerState, error) {
+func (r Runner) Apply(ctx context.Context, dir string, cfg *deployment.Config, opts ApplyOptions, p events.Progress) (docker.ContainerState, error) {
 	var none docker.ContainerState
 
 	// =========================
@@ -73,22 +75,22 @@ func (r Runner) Apply(dir string, cfg *deployment.Config, opts ApplyOptions) (do
 	// =========================
 
 	if cfg.Source.Type == deployment.SourceGit && opts.Build {
-		ui.Step("clone", "cloning %s", cfg.Source.Repository)
-		src, err := r.Clone(cfg.Source.Repository)
+		p.Step("clone", "cloning %s", cfg.Source.Repository)
+		src, err := r.Clone(ctx, cfg.Source.Repository, p.Writer())
 		if err != nil {
 			return none, fmt.Errorf("git clone: %w", err)
 		}
 
-		ui.Step("build", "building %s image", cfg.Build.Platform)
+		p.Step("build", "building %s image", cfg.Build.Platform)
 		if names := buildArgNames(cfg.Build); len(names) > 0 {
 			// names only — values are never logged
-			ui.Detail("build args", fmt.Sprint(names))
+			p.Detail("build args", fmt.Sprint(names))
 		}
-		err = r.Build(cfg.Image, src, docker.BuildOptions{
+		err = r.Build(ctx, cfg.Image, src, docker.BuildOptions{
 			Platform:    cfg.Build.Platform,
 			Args:        cfg.Build.Args,
 			ArgsFromEnv: cfg.Build.ArgsFromEnv,
-		})
+		}, p.Writer())
 		if err != nil {
 			return none, fmt.Errorf("build failed, existing deployment left untouched: %w", err)
 		}
@@ -120,24 +122,24 @@ func (r Runner) Apply(dir string, cfg *deployment.Config, opts ApplyOptions) (do
 		if !backup.changed() {
 			return none, fmt.Errorf("%s: %w", stage, cause)
 		}
-		ui.Warn("%s failed, restoring previous configuration", stage)
+		p.Warn("%s failed, restoring previous configuration", stage)
 		if rerr := backup.restore(); rerr != nil {
 			return none, errors.Join(fmt.Errorf("%s: %w", stage, cause), fmt.Errorf("restore: %w", rerr))
 		}
 		if backup.hadCompose() {
-			if uerr := r.ComposeUp(dir); uerr != nil {
+			if uerr := r.ComposeUp(ctx, dir, p.Writer()); uerr != nil {
 				return none, errors.Join(fmt.Errorf("%s: %w", stage, cause), fmt.Errorf("restarting previous configuration: %w", uerr))
 			}
 		}
 		return none, fmt.Errorf("%s (previous configuration restored): %w", stage, cause)
 	}
 
-	ui.Step("up", "starting %s", cfg.Name)
-	if err := r.ComposeUp(dir); err != nil {
+	p.Step("up", "starting %s", cfg.Name)
+	if err := r.ComposeUp(ctx, dir, p.Writer()); err != nil {
 		return fail("compose up", err)
 	}
 
-	ui.Step("verify", "waiting for %s", cfg.Name)
+	p.Step("verify", "waiting for %s", cfg.Name)
 	st, err := r.WaitReady(cfg.Name, readyTimeout(cfg.Healthcheck))
 	if err != nil {
 		return fail("verify", err)

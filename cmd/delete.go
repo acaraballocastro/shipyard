@@ -1,8 +1,9 @@
 package cmd
 
 import (
-	"os"
-	"os/exec"
+	"errors"
+
+	"shipyard/internal/core"
 	"shipyard/internal/state"
 	"shipyard/internal/ui"
 
@@ -11,31 +12,19 @@ import (
 
 var deleteCmd = &cobra.Command{
 	Use:   "delete [app]",
-	Short: "Elimina un servicio desplegado",
+	Short: "Remove a deployed service",
 	Args:  appArg,
 	Run: func(cmd *cobra.Command, args []string) {
-
 		appName := resolveApp(cmd, args, "Which service do you want to delete?")
 
-		// =========================
-		// LOAD STATE
-		// =========================
-
+		// Fail early on unknown apps instead of asking for confirmation.
 		st, err := state.Load()
 		if err != nil {
-			ui.Fatal("Error loading state: %v", err)
-			return
+			ui.Fatal("state: %s", err)
 		}
-
-		app, ok := st.Apps[appName]
-		if !ok {
-			ui.Fatal("App not found in state: %s", appName)
-			return
+		if _, ok := st.Apps[appName]; !ok {
+			ui.Fatal("%s", errors.Join(core.ErrNotFound, errors.New(appName)))
 		}
-
-		// =========================
-		// CONFIRMATION
-		// =========================
 
 		if !ui.Confirm("this will remove " + appName + " and its compose file. continue?") {
 			ui.Info("aborted")
@@ -43,44 +32,9 @@ var deleteCmd = &cobra.Command{
 		}
 
 		ui.Section("delete")
-
-		// =========================
-		// STOP CONTAINER
-		// =========================
-
-		ui.Step("down", "stopping containers")
-
-		cmdDown := exec.Command("docker", "compose", "down")
-		cmdDown.Dir = app.Path
-		cmdDown.Stdout = os.Stdout
-		cmdDown.Stderr = os.Stderr
-
-		if err := cmdDown.Run(); err != nil {
-			ui.Fatal("docker compose down: %s", err)
+		if err := core.New().Delete(cmd.Context(), appName, ui.Progress()); err != nil {
+			ui.Fatal("%s", err)
 		}
-
-		// =========================
-		// DELETE FILES
-		// =========================
-
-		ui.Step("clean", "removing files")
-
-		if err := os.RemoveAll(app.Path); err != nil {
-			ui.Fatal("removing directory: %s", err)
-		}
-
-		// =========================
-		// UPDATE STATE
-		// =========================
-
-		delete(st.Apps, appName)
-
-		if err := state.Save(st); err != nil {
-			ui.Fatal("saving state: %s", err)
-		}
-
-		ui.Ok("%s removed", appName)
-
 	},
 }
 

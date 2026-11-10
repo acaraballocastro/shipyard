@@ -20,4 +20,7 @@ type Config struct {
 type Server struct {
 	// Host is passed to ssh: user@host, or an alias from ~/.ssh/config.
 	Host string `yaml:"host"`
+	// URL and Token reach `shipyard serve` on the server (web UI/API).
+	URL   string `yaml:"url,omitempty"`
+	Token string `yaml:"token,omitempty"`
 }

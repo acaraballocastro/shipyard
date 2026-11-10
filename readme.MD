@@ -82,6 +82,21 @@ Flags still work as before and skip the questions. Prompts are disabled when the
 
 ---
 
+### Web UI
+
+```bash
+shipyard ui            # on your Mac: opens the dashboard in the browser
+```
+
+* Shows this machine and every server with its API enabled: services, status, resources and live logs.
+* `shipyard server add` offers to enable the API on the server: it installs `shipyard serve` as a systemd service on port 7878 and stores its URL and token in your `~/.shipyard.yaml`.
+* The browser only talks to `shipyard ui` on `127.0.0.1` (one-time token, HttpOnly cookie); server tokens never reach it.
+* `shipyard serve` can also be opened directly (`http://<server>:7878`, sign in with `shipyard serve token`). Over a LAN this is plain HTTP for now; publishing it through Traefik with TLS is planned.
+
+Development: `make web-dev` runs the frontend with hot reload against `shipyard ui --port 7878`; `make build` builds the frontend and embeds it in the binary.
+
+---
+
 ### Remote servers
 
 Deploy to another machine (e.g. a Raspberry Pi) over SSH. Shipyard runs on the server too:

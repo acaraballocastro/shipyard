@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"shipyard/internal/events"
 )
 
 // Color codes — only emitted when stdout is a TTY and NO_COLOR is unset.
@@ -241,4 +243,29 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+// Render prints a progress event in the CLI style.
+func Render(e events.Event) {
+	switch e.Level {
+	case events.LevelStep:
+		Step(e.Stage, "%s", e.Message)
+	case events.LevelWarn:
+		Warn("%s", e.Message)
+	case events.LevelDetail:
+		Detail(e.Key, e.Message)
+	case events.LevelOk:
+		Ok("%s", e.Message)
+	default:
+		Info("%s", e.Message)
+	}
+}
+
+// Progress renders events on the terminal and streams subprocess output.
+func Progress() events.Progress {
+	return events.Progress{Emit: Render, Out: os.Stdout}
 }

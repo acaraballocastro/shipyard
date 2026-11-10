@@ -1,41 +1,20 @@
 package docker
 
 import (
-	"os"
-	"os/exec"
+	"context"
+	"io"
+
+	"shipyard/internal/system"
 )
 
-func ComposeUp(path string) error {
-
-	// =========================
-	// PULL LATEST IMAGE
-	// =========================
-
-	pull := exec.Command("docker", "compose", "pull")
-	pull.Dir = path
-	pull.Stdout = os.Stdout
-	pull.Stderr = os.Stderr
-
-	if err := pull.Run(); err != nil {
+// ComposeUp pulls the latest images and recreates the containers.
+func ComposeUp(ctx context.Context, path string, out io.Writer) error {
+	if err := system.RunIn(ctx, path, out, "docker", "compose", "pull"); err != nil {
 		return err
 	}
-
-	// =========================
-	// RECREATE CONTAINERS
-	// =========================
-
-	up := exec.Command("docker", "compose", "up", "-d", "--remove-orphans")
-	up.Dir = path
-	up.Stdout = os.Stdout
-	up.Stderr = os.Stderr
-
-	return up.Run()
+	return system.RunIn(ctx, path, out, "docker", "compose", "up", "-d", "--remove-orphans")
 }
 
-func ComposeDown(path string) error {
-	cmd := exec.Command("docker", "compose", "down")
-	cmd.Dir = path
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+func ComposeDown(ctx context.Context, path string, out io.Writer) error {
+	return system.RunIn(ctx, path, out, "docker", "compose", "down")
 }

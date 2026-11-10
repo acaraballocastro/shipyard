@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"shipyard/internal/config"
+	"shipyard/internal/core"
 	"shipyard/internal/deployment"
 	"shipyard/internal/docker"
 	"shipyard/internal/prompt"
@@ -211,7 +212,7 @@ func runDeployWizard(fs *pflag.FlagSet) error {
 				Description("One KEY=VALUE per line (stored in the service .env, not in yaml)").
 				Value(&a.env).
 				Validate(func(s string) error {
-					_, err := ParseEnvVars(lines(s))
+					_, err := core.ParseEnvVars(lines(s))
 					return err
 				}),
 		).WithHideFunc(func() bool { return !has(extraEnv) }),
@@ -251,7 +252,7 @@ func runDeployWizard(fs *pflag.FlagSet) error {
 				Description("One KEY=VALUE (or KEY to read from env) per line, optional. Not for secrets.").
 				Value(&a.buildArgs).
 				Validate(func(s string) error {
-					_, _, err := ParseBuildArgs(lines(s))
+					_, _, err := core.ParseBuildArgs(lines(s))
 					return err
 				}),
 		).WithHideFunc(func() bool { return !isRepo() || !has(extraBuild) }),

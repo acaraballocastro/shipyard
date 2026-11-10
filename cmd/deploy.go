@@ -2,21 +2,12 @@ package cmd
 
 import (
 	"errors"
-	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 
-	"shipyard/internal/config"
+	"shipyard/internal/core"
 	"shipyard/internal/deployment"
-	"shipyard/internal/docker"
-	"shipyard/internal/envfile"
-	"shipyard/internal/git"
 	"shipyard/internal/prompt"
-	"shipyard/internal/state"
 	"shipyard/internal/ui"
-	shipyardUpdate "shipyard/internal/update"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -89,325 +80,69 @@ else is preserved. --env merges into the existing variables.`,
 			}
 		}
 
-		if repo != "" {
-			if err := deployment.ValidateRepo(repo); err != nil {
-				ui.Fatal("%s", err)
-			}
-		}
-
 		ui.Section("deploy")
 
-		// =========================
-		// RESOLVE SOURCE
-		// =========================
-
-		isImage := image != "" && repo == ""
-
-		var serviceName string
-		var finalImage string
-
-		if isImage {
-			ui.Info("mode image: %s", image)
-			serviceName = docker.AdvancedNormalizeName(image)
-			finalImage = image
-		} else {
-			cfg, err := config.Load()
-			if err != nil {
-				ui.Fatal("config: %s", err)
-			}
-			imgName := image
-			if imgName == "" {
-				imgName = git.ExtractRepoName(repo)
-			}
-			serviceName = docker.NormalizeName(imgName)
-			finalImage = fmt.Sprintf("ghcr.io/%s/%s", strings.ToLower(cfg.GitHubUser), serviceName)
-			ui.Info("mode repo: %s", repo)
-		}
-
-		if serviceNameFlag != "" {
-			serviceName = serviceNameFlag
-		}
-		if !deployment.ValidName(serviceName) {
-			ui.Fatal("invalid service name %q (use --name to choose one)", serviceName)
-		}
-
-		dir := filepath.Join(composePath, serviceName)
-
-		// =========================
-		// BUILD CONFIGURATION
-		// =========================
-
-		cfg, existing, err := loadExisting(serviceName, dir)
-		if err != nil {
+		if _, err := core.New().Deploy(cmd.Context(), deployRequest(cmd.Flags()), ui.Progress()); err != nil {
 			ui.Fatal("%s", err)
 		}
-		if existing {
-			ui.Info("existing deployment found, unspecified settings are preserved")
-		}
-
-		setEnv, err := applyFlags(cmd.Flags(), cfg, existing, serviceName, finalImage, isImage)
-		if err != nil {
-			ui.Fatal("%s", err)
-		}
-
-		ui.Detail("image", cfg.Image)
-		ui.Detail("path", dir)
-		if cfg.Deploy.Network != "" {
-			ui.Detail("network", cfg.Deploy.Network)
-		}
-		if cfg.Deploy.Domain != "" {
-			ui.Detail("domain", cfg.Deploy.Domain)
-		}
-		if len(cfg.Env.Files) > 0 {
-			ui.Detail("env files", strings.Join(cfg.Env.Files, ", "))
-		}
-		if len(setEnv) > 0 {
-			ui.Detail("env", strings.Join(sortedKeys(setEnv), ", "))
-		}
-
-		// =========================
-		// NETWORK
-		// =========================
-
-		if cfg.Deploy.Network != "" && createNetwork {
-			if !docker.NetworkExists(cfg.Deploy.Network) {
-				ui.Step("network", "creating %s", cfg.Deploy.Network)
-				if err := docker.CreateNetwork(cfg.Deploy.Network); err != nil {
-					ui.Fatal("network: %s", err)
-				}
-			}
-		}
-
-		// =========================
-		// BUILD + COMPOSE + UP + VERIFY
-		// =========================
-
-		cs, err := shipyardUpdate.DefaultRunner.Apply(dir, cfg, shipyardUpdate.ApplyOptions{
-			Build:  true,
-			SetEnv: setEnv,
-		})
-		if err != nil {
-			ui.Fatal("deploy: %s", err)
-		}
-		if cs.Health != "" {
-			ui.Detail("health", cs.Health)
-		}
-
-		// =========================
-		// STATE
-		// =========================
-
-		st, err := state.Load()
-		if err != nil {
-			ui.Fatal("state: %s", err)
-		}
-		st.Apps[serviceName] = shipyardUpdate.MergeState(st.Apps[serviceName], cfg, dir)
-		if err := state.Save(st); err != nil {
-			ui.Fatal("saving state: %s", err)
-		}
-
-		ui.Ok("%s deployed", serviceName)
 	},
 }
 
-// loadExisting returns the saved configuration of a service or a fresh one.
-func loadExisting(name, dir string) (*deployment.Config, bool, error) {
-	cfg, err := deployment.Load(dir)
-	if err == nil {
-		if cfg.Name != name {
-			return nil, false, fmt.Errorf("%s/%s describes %q, not %q", dir, deployment.FileName, cfg.Name, name)
+// deployRequest maps the flags the user set onto a core.DeployRequest:
+// unset flags stay nil so a redeploy keeps the saved values.
+func deployRequest(fs *pflag.FlagSet) core.DeployRequest {
+	str := func(name string, v string) *string {
+		if !fs.Changed(name) {
+			return nil
 		}
-		return cfg, true, nil
+		return &v
 	}
-	if !errors.Is(err, deployment.ErrNotFound) {
-		return nil, false, err
+	list := func(name string, v []string) *[]string {
+		if !fs.Changed(name) {
+			return nil
+		}
+		return &v
 	}
+	req := core.DeployRequest{
+		Repo:          repo,
+		Image:         image,
+		Name:          serviceNameFlag,
+		Root:          composePath,
+		Mode:          str("mode", mode),
+		Domain:        str("domain", domain),
+		Network:       str("network", network),
+		CreateNetwork: createNetwork,
+		InternalPort:  str("internal-port", internalPort),
+		Ports:         list("port", ports),
+		Volumes:       list("volume", volumes),
+		EnvFiles:      list("env-file", envFiles),
+		BuildArgs:     list("build-arg", buildArgs),
+		Platform:      str("platform", platform),
+		Entrypoint:    str("entrypoint", entrypoint),
+		CertResolver:  str("cert-resolver", certResolver),
+		RouterName:    str("router-name", routerName),
+		Middlewares:   list("middleware", middlewares),
 
-	// A legacy deployment registered in state: migrate its settings.
-	if st, serr := state.Load(); serr == nil {
-		if app, ok := st.Apps[name]; ok && app.Path == dir {
-			if cfg, merr := deployment.FromLegacy(name, app); merr == nil {
-				return cfg, true, nil
-			}
-		}
+		HealthcheckCmd:         str("healthcheck-cmd", healthcheckCmd),
+		HealthcheckInterval:    str("healthcheck-interval", healthcheckInterval),
+		HealthcheckTimeout:     str("healthcheck-timeout", healthcheckTimeout),
+		HealthcheckStartPeriod: str("healthcheck-start-period", healthcheckStartPeriod),
+		NoHealthcheck:          noHealthcheck,
 	}
-
-	return &deployment.Config{Version: deployment.CurrentVersion, Name: name}, false, nil
-}
-
-// applyFlags overlays CLI flags onto cfg. For a new deployment every flag
-// (including defaults) applies; for an existing one only flags the user
-// set explicitly. It returns the --env variables to merge.
-func applyFlags(fs *pflag.FlagSet, cfg *deployment.Config, existing bool, name, finalImage string, isImage bool) (map[string]string, error) {
-	set := func(flag string) bool { return !existing || fs.Changed(flag) }
-
-	cfg.Name = name
-	cfg.Image = finalImage
-	if isImage {
-		cfg.Source = deployment.Source{Type: deployment.SourceImage}
-		cfg.Build = deployment.Build{}
-	} else {
-		cfg.Source = deployment.Source{Type: deployment.SourceGit, Repository: repo}
+	if fs.Changed("tls") {
+		req.TLS = &tls
 	}
-
-	if set("mode") {
-		cfg.Deploy.Mode = mode
+	if fs.Changed("healthcheck-retries") {
+		req.HealthcheckRetries = &healthcheckRetries
 	}
-	if set("domain") {
-		cfg.Deploy.Domain = domain
-	}
-	if set("network") {
-		cfg.Deploy.Network = network
-	}
-	if set("internal-port") {
-		cfg.Deploy.InternalPort = internalPort
-	}
-	if set("port") {
-		cfg.Deploy.Ports = ports
-	}
-	if set("volume") {
-		cfg.Deploy.Volumes = volumes
-	}
-	if set("entrypoint") {
-		cfg.Deploy.Entrypoint = entrypoint
-	}
-	if set("tls") {
-		cfg.Deploy.TLS = tls
-	}
-	if set("cert-resolver") {
-		cfg.Deploy.CertResolver = certResolver
-	}
-	if set("router-name") {
-		cfg.Deploy.RouterName = routerName
-	}
-	if set("middleware") {
-		cfg.Deploy.Middlewares = middlewares
-	}
-
-	// Build
-	if !isImage {
-		if set("platform") {
-			if err := deployment.ValidatePlatform(platform); err != nil {
-				return nil, err
-			}
-			cfg.Build.Platform = platform
-		}
-		if set("build-arg") {
-			args, fromEnv, err := ParseBuildArgs(buildArgs)
-			if err != nil {
-				return nil, err
-			}
-			cfg.Build.Args = args
-			cfg.Build.ArgsFromEnv = fromEnv
-		}
-	} else if fs.Changed("build-arg") || fs.Changed("platform") {
-		return nil, fmt.Errorf("--build-arg and --platform only apply to --repo deployments")
-	}
-
-	// Env files: stored as absolute paths, replaced when passed.
-	if set("env-file") {
-		files := make([]string, 0, len(envFiles))
-		seen := map[string]bool{}
-		for _, f := range envFiles {
-			abs, err := filepath.Abs(f)
-			if err != nil {
-				return nil, fmt.Errorf("env file %s: %w", f, err)
-			}
-			if err := envfile.Validate(abs); err != nil {
-				return nil, err
-			}
-			if !seen[abs] {
-				seen[abs] = true
-				files = append(files, abs)
-			}
-		}
-		cfg.Env.Files = files
-	}
-
-	// Healthcheck
-	if noHealthcheck {
-		cfg.Healthcheck = deployment.Healthcheck{Enabled: false}
-	} else {
-		if fs.Changed("healthcheck-cmd") {
-			cfg.Healthcheck.Enabled = healthcheckCmd != ""
-			cfg.Healthcheck.Command = healthcheckCmd
-		}
-		if fs.Changed("healthcheck-interval") {
-			cfg.Healthcheck.Interval = healthcheckInterval
-		}
-		if fs.Changed("healthcheck-timeout") {
-			cfg.Healthcheck.Timeout = healthcheckTimeout
-		}
-		if fs.Changed("healthcheck-retries") {
-			if healthcheckRetries < 0 {
-				return nil, fmt.Errorf("--healthcheck-retries must be >= 0")
-			}
-			cfg.Healthcheck.Retries = healthcheckRetries
-		}
-		if fs.Changed("healthcheck-start-period") {
-			cfg.Healthcheck.StartPeriod = healthcheckStartPeriod
-		}
-	}
-
-	// --env values: merged into the local .env, never stored in yaml.
-	setEnv, err := ParseEnvVars(envVars)
+	env, err := core.ParseEnvVars(envVars)
 	if err != nil {
-		return nil, err
+		ui.Fatal("%s", err)
 	}
-
-	cfg.Normalize()
-	if err := cfg.Validate(true); err != nil {
-		return nil, err
+	if len(env) > 0 {
+		req.Env = env
 	}
-	return setEnv, nil
-}
-
-// ParseEnvVars parses repeated --env KEY=VALUE flags.
-func ParseEnvVars(vals []string) (map[string]string, error) {
-	out := map[string]string{}
-	for _, v := range vals {
-		k, val, err := envfile.ParseAssignment(v)
-		if err != nil {
-			return nil, fmt.Errorf("--env: %w", err)
-		}
-		out[k] = val
-	}
-	return out, nil
-}
-
-// ParseBuildArgs parses repeated --build-arg flags. KEY=VALUE is stored;
-// a bare KEY is read from the environment at build time.
-func ParseBuildArgs(vals []string) (map[string]string, []string, error) {
-	args := map[string]string{}
-	var fromEnv []string
-	for _, v := range vals {
-		if !strings.Contains(v, "=") {
-			k := strings.TrimSpace(v)
-			if !envfile.ValidKey(k) {
-				return nil, nil, fmt.Errorf("--build-arg: invalid name %q", k)
-			}
-			fromEnv = append(fromEnv, k)
-			continue
-		}
-		k, val, err := envfile.ParseAssignment(v)
-		if err != nil {
-			return nil, nil, fmt.Errorf("--build-arg: %w", err)
-		}
-		args[k] = val
-	}
-	if len(args) == 0 {
-		args = nil
-	}
-	return args, fromEnv, nil
-}
-
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return req
 }
 
 func init() {

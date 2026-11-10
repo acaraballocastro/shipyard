@@ -1,7 +1,9 @@
 package docker
 
 import (
+	"context"
 	"errors"
+	"io"
 	"reflect"
 	"testing"
 	"time"
@@ -32,7 +34,7 @@ func TestBuildArgsWithOptions(t *testing.T) {
 }
 
 func TestBuildFromEnvMissing(t *testing.T) {
-	err := BuildAndPushWith("img", "/nonexistent", BuildOptions{ArgsFromEnv: []string{"SHIPYARD_DEFINITELY_UNSET_123"}})
+	err := BuildAndPushWith(context.Background(), "img", "/nonexistent", BuildOptions{ArgsFromEnv: []string{"SHIPYARD_DEFINITELY_UNSET_123"}}, io.Discard)
 	if err == nil {
 		t.Fatal("expected error for unset env build arg")
 	}

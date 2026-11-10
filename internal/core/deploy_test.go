@@ -1,9 +1,7 @@
-package cmd
+package core
 
 import (
 	"shipyard/internal/deployment"
-
-	"github.com/spf13/pflag"
 
 	"strings"
 	"testing"
@@ -40,7 +38,7 @@ func TestParseEnvVars(t *testing.T) {
 	}
 }
 
-func TestApplyFlagsRedeployPreservesUnsetFlags(t *testing.T) {
+func TestRequestRedeployPreservesUnsetFields(t *testing.T) {
 	existing := &deployment.Config{
 		Version: 1, Name: "inariweb", Image: "ghcr.io/u/inariweb",
 		Source: deployment.Source{Type: "git", Repository: "u/inariWeb"},
@@ -49,13 +47,9 @@ func TestApplyFlagsRedeployPreservesUnsetFlags(t *testing.T) {
 			InternalPort: "3000", Entrypoint: "websecure", TLS: true},
 		Healthcheck: deployment.Healthcheck{Enabled: true, Command: "true"},
 	}
-	fs := pflag.NewFlagSet("t", pflag.ContinueOnError)
-	fs.AddFlagSet(deployCmd.Flags())
-	if err := fs.Parse([]string{"--repo", "u/inariWeb", "--domain", "new.example.com", "--env", "X=1"}); err != nil {
-		t.Fatal(err)
-	}
-	setEnv, err := applyFlags(fs, existing, true, "inariweb", "ghcr.io/u/inariweb", false)
-	if err != nil {
+	domain := "new.example.com"
+	req := DeployRequest{Repo: "u/inariWeb", Domain: &domain, Env: map[string]string{"X": "1"}}
+	if err := req.apply(existing, true, "inariweb", "ghcr.io/u/inariweb", false); err != nil {
 		t.Fatal(err)
 	}
 	d := existing.Deploy
@@ -65,7 +59,23 @@ func TestApplyFlagsRedeployPreservesUnsetFlags(t *testing.T) {
 	if existing.Build.Platform != "linux/amd64" || existing.Build.Args["A"] != "1" || !existing.Healthcheck.Enabled {
 		t.Fatalf("build/healthcheck not preserved: %+v %+v", existing.Build, existing.Healthcheck)
 	}
-	if setEnv["X"] != "1" {
-		t.Fatalf("env %v", setEnv)
+}
+
+func TestRequestNewDeploymentDefaults(t *testing.T) {
+	cfg := &deployment.Config{Version: 1, Name: "app"}
+	if err := (DeployRequest{Repo: "u/app"}).apply(cfg, false, "app", "ghcr.io/u/app", false); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Deploy.Mode != "local" || cfg.Deploy.InternalPort != "80" || cfg.Deploy.Entrypoint != "web" || cfg.Build.Platform != deployment.DefaultPlatform {
+		t.Fatalf("defaults not applied: %+v %+v", cfg.Deploy, cfg.Build)
+	}
+}
+
+func TestRequestImageRejectsBuildArgs(t *testing.T) {
+	cfg := &deployment.Config{Version: 1, Name: "whoami"}
+	args := []string{"A=1"}
+	err := (DeployRequest{Image: "traefik/whoami", BuildArgs: &args}).apply(cfg, false, "whoami", "traefik/whoami", true)
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }

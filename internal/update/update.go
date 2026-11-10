@@ -1,18 +1,14 @@
 package update
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	"shipyard/internal/deployment"
+	"shipyard/internal/events"
 	"shipyard/internal/state"
-	"shipyard/internal/ui"
 )
-
-// Run updates a deployed service using its saved configuration.
-func Run(appName string) error {
-	return DefaultRunner.Update(appName)
-}
 
 // LoadConfig returns the deployment configuration of a service, migrating
 // legacy deployments (state entry + compose file only) in memory.
@@ -35,7 +31,7 @@ func LoadConfig(appName string, app state.App) (cfg *deployment.Config, migrated
 
 // Update rebuilds (git) or re-pulls (image) a service and recreates it,
 // reusing every setting from deployment.yaml.
-func (r Runner) Update(appName string) error {
+func (r Runner) Update(ctx context.Context, appName string, p events.Progress) error {
 
 	// =========================
 	// LOAD STATE + CONFIG
@@ -56,22 +52,22 @@ func (r Runner) Update(appName string) error {
 		return err
 	}
 	if migrated {
-		ui.Info("no %s found, migrating settings from state and compose file", deployment.FileName)
+		p.Info("no %s found, migrating settings from state and compose file", deployment.FileName)
 	}
 
-	ui.Detail("source", cfg.Source.Type)
-	ui.Detail("image", cfg.Image)
+	p.Detail("source", cfg.Source.Type)
+	p.Detail("image", cfg.Image)
 
 	// =========================
 	// APPLY
 	// =========================
 
-	cs, err := r.Apply(app.Path, cfg, ApplyOptions{Build: true})
+	cs, err := r.Apply(ctx, app.Path, cfg, ApplyOptions{Build: true}, p)
 	if err != nil {
 		return err
 	}
 	if cs.Health != "" {
-		ui.Detail("health", cs.Health)
+		p.Detail("health", cs.Health)
 	}
 
 	// =========================

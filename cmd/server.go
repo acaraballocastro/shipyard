@@ -1,8 +1,13 @@
 package cmd
 
 import (
+	"context"
+	"os/exec"
+	"time"
+
 	"errors"
 	"fmt"
+	"shipyard/internal/api"
 	"strings"
 
 	"shipyard/internal/config"
@@ -74,10 +79,34 @@ var serverAddCmd = &cobra.Command{
 			ui.Fatal("server %s is not ready, nothing saved", name)
 		}
 
+		srv := config.Server{Host: serverHost}
+		if prev, ok := cfg.Servers[name]; ok && prev.Host == serverHost {
+			srv.URL, srv.Token = prev.URL, prev.Token
+		}
+		enable := true
+		if prompt.Interactive() {
+			abortOn(prompt.Run(huh.NewForm(huh.NewGroup(
+				huh.NewConfirm().Title("Enable the web UI / API on " + name + "?").
+					Description("Installs shipyard serve as a systemd service (port " + DefaultServePort + ")").
+					Value(&enable),
+			))))
+		} else {
+			enable = false
+			ui.Info("web UI not enabled (non-interactive); run shipyard server add %s again in a terminal", name)
+		}
+		if enable {
+			if url, tok, err := enableAPI(serverHost); err != nil {
+				ui.Warn("web UI/API: %s", err)
+			} else {
+				srv.URL, srv.Token = url, tok
+				ui.CheckOk("api", url)
+			}
+		}
+
 		if cfg.Servers == nil {
 			cfg.Servers = map[string]config.Server{}
 		}
-		cfg.Servers[name] = config.Server{Host: serverHost}
+		cfg.Servers[name] = srv
 		if makeDefault {
 			cfg.DefaultServer = name
 		}
@@ -269,4 +298,48 @@ func init() {
 	serverCmd.AddCommand(serverAddCmd, serverListCmd, serverUseCmd, serverRemoveCmd)
 	serverAddCmd.Flags().StringVar(&serverHost, "host", "", "SSH host: user@host or ~/.ssh/config alias")
 	serverAddCmd.Flags().BoolVar(&serverSetDefault, "default", false, "Make it the default server")
+}
+
+// enableAPI installs `shipyard serve` on host and returns its URL and token
+// after checking that the API answers.
+func enableAPI(host string) (string, string, error) {
+	fmt.Println()
+	err := remote.Run(host, remote.Options{TTY: true}, remote.Bin, "--server", localTarget, "serve", "install")
+	if err != nil {
+		return "", "", fmt.Errorf("installing shipyard serve: %w", err)
+	}
+	out, err := remote.Output(host, remote.Bin, "serve", "token")
+	if err != nil {
+		return "", "", fmt.Errorf("reading token: %w", err)
+	}
+	token := strings.TrimSpace(string(out))
+	url := "http://" + sshHostname(host) + ":" + DefaultServePort
+
+	b := api.Remote{URL: url, Token: token}
+	var lastErr error
+	for i := 0; i < 10; i++ { // the service may need a moment to start
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, lastErr = b.Info(ctx)
+		cancel()
+		if lastErr == nil {
+			return url, token, nil
+		}
+		time.Sleep(time.Second)
+	}
+	return "", "", fmt.Errorf("%s does not answer: %w", url, lastErr)
+}
+
+// sshHostname resolves user@host or a ~/.ssh/config alias to the host name.
+func sshHostname(host string) string {
+	if out, err := exec.Command("ssh", "-G", host).Output(); err == nil {
+		for _, l := range strings.Split(string(out), "\n") {
+			if h, ok := strings.CutPrefix(l, "hostname "); ok {
+				return strings.TrimSpace(h)
+			}
+		}
+	}
+	if i := strings.LastIndex(host, "@"); i >= 0 {
+		return host[i+1:]
+	}
+	return host
 }
