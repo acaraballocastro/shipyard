@@ -28,4 +28,4 @@ echo "📦 Installing Shipyard..."
 sudo mv shipyard /usr/local/bin/shipyard
 
 echo "✅ Shipyard installed!"
-echo "👉 Run: shipyard --help"
+echo "👉 Next: shipyard setup   (installs Docker if needed, GitHub access, ghcr login)"

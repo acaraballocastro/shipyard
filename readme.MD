@@ -89,7 +89,7 @@ cloning, building, pushing and running all happen **on the server that hosts the
 and its state lives there. Your machine only asks the questions and forwards the command.
 
 ```bash
-shipyard server add pi --host pi@192.168.1.50   # checks ssh/docker, installs shipyard, offers `setup`
+shipyard server add pi --host pi@192.168.1.50   # checks ssh, installs shipyard and runs `setup` on it
 shipyard deploy                                  # the wizard asks where to deploy
 shipyard deploy --server pi --repo user/app      # or explicitly
 shipyard logs                                    # pick a service on the default server
@@ -100,7 +100,7 @@ shipyard server use local                        # change the default
 * `--server` works with `deploy`, `update`, `logs`, `restart`, `status`, `shell`, `delete`, `list`, `cleanup` and `doctor`. `watch` always runs locally: start it on the server itself.
 * Local `--env-file` files are uploaded to `~/.shipyard/envfiles/` on the server (0600). `--env` values are sent over stdin, never on the command line.
 * SSH uses your normal `ssh` client, so `~/.ssh/config`, keys and agents apply. Passwordless (key) login is required.
-* The server needs what a local repo deploy needs: `shipyard setup`, `docker login ghcr.io`, Docker Buildx and an SSH key with GitHub access.
+* `shipyard setup` (run automatically by `server add`, or later with `shipyard setup --server pi`) prepares the machine: installs git/Docker/Compose/Buildx if missing, gives your user Docker access, creates `/srv/apps` and `/srv/repos`, trusts github.com, creates an SSH key and adds it to GitHub, and logs in to ghcr.io. It asks once for a GitHub token (`write:packages`, `admin:public_key`) that is only used for those steps and is not stored. It is idempotent; `shipyard doctor` shows the same checks without changing anything.
 
 ---
 

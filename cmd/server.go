@@ -131,21 +131,11 @@ func checkServer(name, host string) bool {
 	}
 	ui.CheckOk("shipyard", "installed")
 
-	// Builds run on the server: it needs its own shipyard setup (github_user),
-	// a GHCR login and GitHub SSH access.
-	if _, err := remote.Output(host, "test", "-f", ".shipyard.yaml"); err != nil {
-		ui.CheckFail("setup", "shipyard setup has not been run on the server")
-		if prompt.Interactive() && ui.Confirm("run shipyard setup on "+name+" now?") {
-			_ = remote.Run(host, remote.Options{TTY: true}, remote.Bin, "setup")
-		}
-	} else {
-		ui.CheckOk("setup", "~/.shipyard.yaml")
+	// Prepare the server: packages, docker access, dirs, ghcr and GitHub.
+	fmt.Println()
+	if code := remoteSetup(target{Name: name, Server: &config.Server{Host: host}}); code != 0 {
+		ui.Warn("setup did not finish on %s; the server is saved, finish later with: shipyard setup --server %s", name, name)
 	}
-
-	ui.Info("repo deployments build on the server, so it also needs:")
-	ui.Detail("ghcr", "docker login ghcr.io (on the server)")
-	ui.Detail("github", "an SSH key with access to your repositories (ssh -T git@github.com)")
-	ui.Detail("buildx", "docker buildx (check: ssh "+host+" docker buildx version)")
 	return true
 }
 
