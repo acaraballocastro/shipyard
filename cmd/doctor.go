@@ -13,6 +13,10 @@ var doctorCmd = &cobra.Command{
 	Short: "Check system dependencies",
 	Run: func(cmd *cobra.Command, args []string) {
 
+		if t := resolveTarget(); t.remote() {
+			forward(t, cmd, nil)
+		}
+
 		ui.Section("doctor")
 		checkDep("git")
 		checkDep("docker")

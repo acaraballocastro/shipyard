@@ -33,10 +33,13 @@ var setupCmd = &cobra.Command{
 		user := prompt("SSH user")
 		sshKey := prompt("SSH key path")
 
-		cfg := &config.Config{
-			GitHubUser:  githubUser,
-			GitHubToken: githubToken,
+		// Keep settings managed elsewhere (servers, default server).
+		cfg, err := config.LoadOrEmpty()
+		if err != nil {
+			ui.Fatal("config: %s", err)
 		}
+		cfg.GitHubUser = githubUser
+		cfg.GitHubToken = githubToken
 
 		cfg.Device.Host = host
 		cfg.Device.User = user

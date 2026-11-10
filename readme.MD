@@ -82,6 +82,28 @@ Flags still work as before and skip the questions. Prompts are disabled when the
 
 ---
 
+### Remote servers
+
+Deploy to another machine (e.g. a Raspberry Pi) over SSH. Shipyard runs on the server too:
+cloning, building, pushing and running all happen **on the server that hosts the service**,
+and its state lives there. Your machine only asks the questions and forwards the command.
+
+```bash
+shipyard server add pi --host pi@192.168.1.50   # checks ssh/docker, installs shipyard, offers `setup`
+shipyard deploy                                  # the wizard asks where to deploy
+shipyard deploy --server pi --repo user/app      # or explicitly
+shipyard logs                                    # pick a service on the default server
+shipyard list --server local                     # force this machine
+shipyard server use local                        # change the default
+```
+
+* `--server` works with `deploy`, `update`, `logs`, `restart`, `status`, `shell`, `delete`, `list`, `cleanup` and `doctor`. `watch` always runs locally: start it on the server itself.
+* Local `--env-file` files are uploaded to `~/.shipyard/envfiles/` on the server (0600). `--env` values are sent over stdin, never on the command line.
+* SSH uses your normal `ssh` client, so `~/.ssh/config`, keys and agents apply. Passwordless (key) login is required.
+* The server needs what a local repo deploy needs: `shipyard setup`, `docker login ghcr.io`, Docker Buildx and an SSH key with GitHub access.
+
+---
+
 ### Deploy a Docker image
 
 ```bash

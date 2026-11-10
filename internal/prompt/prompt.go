@@ -43,24 +43,20 @@ func Run(f *huh.Form) error {
 }
 
 // SelectApp lets the user choose one of the deployed services.
-func SelectApp(title string) (string, error) {
-	st, err := state.Load()
-	if err != nil {
-		return "", fmt.Errorf("state: %w", err)
-	}
-	if len(st.Apps) == 0 {
+func SelectApp(title string, apps map[string]state.App) (string, error) {
+	if len(apps) == 0 {
 		return "", errors.New("no services deployed yet (try: shipyard deploy)")
 	}
 
-	names := make([]string, 0, len(st.Apps))
-	for n := range st.Apps {
+	names := make([]string, 0, len(apps))
+	for n := range apps {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 
 	opts := make([]huh.Option[string], 0, len(names))
 	for _, n := range names {
-		app := st.Apps[n]
+		app := apps[n]
 		label := n
 		if app.Domain != "" {
 			label = fmt.Sprintf("%s  (%s)", n, app.Domain)
@@ -71,7 +67,7 @@ func SelectApp(title string) (string, error) {
 	}
 
 	var choice string
-	err = Run(huh.NewForm(huh.NewGroup(
+	err := Run(huh.NewForm(huh.NewGroup(
 		huh.NewSelect[string]().
 			Title(title).
 			Options(opts...).

@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"shipyard/internal/config"
 	"shipyard/internal/deployment"
 	"shipyard/internal/docker"
 	"shipyard/internal/prompt"
+	"shipyard/internal/remote"
 	"shipyard/internal/ui"
 
 	"github.com/charmbracelet/huh"
@@ -45,6 +47,7 @@ type wizardAnswers struct {
 	platform     string
 	buildArgs    string
 	createNet    bool
+	server       string
 }
 
 // runDeployWizard asks for the deploy settings interactively and applies
@@ -66,6 +69,24 @@ func runDeployWizard(fs *pflag.FlagSet) error {
 		a.ports = strings.Join(ports, ", ")
 	}
 
+	// Servers: only asked when some are configured and --server was not given.
+	scfg, err := config.LoadOrEmpty()
+	if err != nil {
+		return err
+	}
+	a.server = serverFlag
+	askServer := serverFlag == "" && len(scfg.Servers) > 0
+	if a.server == "" {
+		a.server = scfg.DefaultServer
+	}
+	if a.server == "" {
+		a.server = localTarget
+	}
+	serverOpts := []huh.Option[string]{huh.NewOption("This machine (local)", localTarget)}
+	for _, n := range sortedServerNames(scfg.Servers) {
+		serverOpts = append(serverOpts, huh.NewOption(fmt.Sprintf("%s  (%s)", n, scfg.Servers[n].Host), n))
+	}
+
 	fmt.Println()
 	fmt.Println(ui.Colorize("bold", "Shipyard deploy wizard") + ui.Colorize("dim", "  (Esc/Ctrl+C to cancel)"))
 	fmt.Println()
@@ -82,6 +103,12 @@ func runDeployWizard(fs *pflag.FlagSet) error {
 	}
 
 	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Where do you want to deploy?").
+				Options(serverOpts...).
+				Value(&a.server),
+		).WithHideFunc(func() bool { return !askServer }),
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("What do you want to deploy?").
@@ -234,8 +261,11 @@ func runDeployWizard(fs *pflag.FlagSet) error {
 		return err
 	}
 
+	serverFlag = a.server
+	t := resolveTarget()
+
 	// Offer to create a missing Traefik network.
-	if a.mode == "traefik" && !createNetwork && !docker.NetworkExists(a.network) {
+	if a.mode == "traefik" && !createNetwork && !networkExists(t, a.network) {
 		a.createNet = true
 		err := prompt.Run(huh.NewForm(huh.NewGroup(
 			huh.NewConfirm().
@@ -335,6 +365,10 @@ func (a *wizardAnswers) apply(fs *pflag.FlagSet) error {
 func (a *wizardAnswers) command() string {
 	parts := []string{"shipyard deploy"}
 	add := func(flag, val string) { parts = append(parts, "--"+flag+" "+shellQuote(val)) }
+
+	if a.server != "" && a.server != localTarget {
+		add("server", a.server)
+	}
 
 	if a.source == "repo" {
 		add("repo", a.repo)
@@ -436,4 +470,13 @@ func shellQuote(s string) string {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// networkExists checks a Docker network on the target machine.
+func networkExists(t target, name string) bool {
+	if !t.remote() {
+		return docker.NetworkExists(name)
+	}
+	_, err := remote.Output(t.Server.Host, "docker", "network", "inspect", name)
+	return err == nil
 }

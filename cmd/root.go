@@ -25,6 +25,8 @@ func Execute() {
 func exitQuiet() { os.Exit(0) }
 
 func init() {
+	rootCmd.PersistentFlags().StringVar(&serverFlag, "server", "",
+		"Run on a configured server (see: shipyard server list), or \"local\"")
 	rootCmd.PersistentFlags().BoolVar(&prompt.Disabled, "no-input", false,
 		"Never prompt; fail when required arguments are missing (also SHIPYARD_NO_INPUT=1)")
 }

@@ -17,6 +17,10 @@ var cleanupCmd = &cobra.Command{
 	Short: "Remove orphaned services not registered in state",
 	Run: func(cmd *cobra.Command, args []string) {
 
+		if t := resolveTarget(); t.remote() {
+			forward(t, cmd, nil)
+		}
+
 		ui.Section("cleanup")
 
 		// =========================

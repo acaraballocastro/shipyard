@@ -195,7 +195,7 @@ func Table(headers []string, rows [][]string) {
 //	[ok]  git     /usr/bin/git
 func CheckOk(name, detail string) {
 	tag := colorize(green, "[ok]")
-	n := fmt.Sprintf("%-8s", name)
+	n := fmt.Sprintf("%-9s", name)
 	fmt.Fprintf(out, "  %s  %s%s\n", tag, colorize(bold, n), colorize(dim, detail))
 }
 
@@ -204,7 +204,7 @@ func CheckOk(name, detail string) {
 //	[!!]  ssh     not found in PATH
 func CheckFail(name, detail string) {
 	tag := colorize(red, "[!!]")
-	n := fmt.Sprintf("%-8s", name)
+	n := fmt.Sprintf("%-9s", name)
 	fmt.Fprintf(out, "  %s  %s%s\n", tag, colorize(bold, n), colorize(dim, detail))
 }
 

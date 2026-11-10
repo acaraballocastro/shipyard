@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -78,6 +79,16 @@ else is preserved. --env merges into the existing variables.`,
 				ui.Fatal("%s", err)
 			}
 		}
+
+		if t := resolveTarget(); t.remote() {
+			deployRemote(t, cmd)
+		}
+		if envStdin {
+			if err := readEnvStdin(os.Stdin); err != nil {
+				ui.Fatal("reading env from stdin: %s", err)
+			}
+		}
+
 		if repo != "" {
 			if err := deployment.ValidateRepo(repo); err != nil {
 				ui.Fatal("%s", err)
@@ -440,4 +451,7 @@ func init() {
 	f.IntVar(&healthcheckRetries, "healthcheck-retries", 0, "Healthcheck retries")
 	f.StringVar(&healthcheckStartPeriod, "healthcheck-start-period", "", "Healthcheck start period (e.g. 20s)")
 	f.BoolVar(&noHealthcheck, "no-healthcheck", false, "Remove a previously configured healthcheck")
+
+	f.BoolVar(&envStdin, "env-stdin", false, "Read KEY=VALUE env lines from stdin (used by remote deploys)")
+	_ = f.MarkHidden("env-stdin")
 }
