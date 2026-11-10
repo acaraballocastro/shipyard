@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 
+	"shipyard/internal/prompt"
 	"shipyard/internal/ui"
 
 	"github.com/spf13/cobra"
@@ -18,4 +19,12 @@ func Execute() {
 		ui.Fatal("%s", err)
 		os.Exit(1)
 	}
+}
+
+// exitQuiet ends the process successfully, e.g. after the user cancels a prompt.
+func exitQuiet() { os.Exit(0) }
+
+func init() {
+	rootCmd.PersistentFlags().BoolVar(&prompt.Disabled, "no-input", false,
+		"Never prompt; fail when required arguments are missing (also SHIPYARD_NO_INPUT=1)")
 }

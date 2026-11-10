@@ -12,10 +12,10 @@ import (
 var deleteCmd = &cobra.Command{
 	Use:   "delete [app]",
 	Short: "Elimina un servicio desplegado",
-	Args:  cobra.ExactArgs(1),
+	Args:  appArg,
 	Run: func(cmd *cobra.Command, args []string) {
 
-		appName := args[0]
+		appName := resolveApp(cmd, args, "Which service do you want to delete?")
 
 		// =========================
 		// LOAD STATE

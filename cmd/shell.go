@@ -15,11 +15,11 @@ var shellUser string
 var shellCmd = &cobra.Command{
 	Use:   "shell [app]",
 	Short: "Open an interactive shell inside a running container",
-	Args:  cobra.ExactArgs(1),
+	Args:  appArg,
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		appName := args[0]
+		appName := resolveApp(cmd, args, "Open a shell in which service?")
 
 		// =========================
 		// LOAD STATE

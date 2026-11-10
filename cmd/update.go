@@ -10,11 +10,11 @@ import (
 var updateCmd = &cobra.Command{
 	Use:   "update [app]",
 	Short: "Rebuild and redeploy a running service",
-	Args:  cobra.ExactArgs(1),
+	Args:  appArg,
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		appName := args[0]
+		appName := resolveApp(cmd, args, "Which service do you want to update?")
 
 		ui.Section("update")
 		ui.Info("updating %s", appName)

@@ -13,11 +13,11 @@ import (
 var logsCmd = &cobra.Command{
 	Use:   "logs [app]",
 	Short: "Stream logs from a deployed service",
-	Args:  cobra.ExactArgs(1),
+	Args:  appArg,
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		appName := args[0]
+		appName := resolveApp(cmd, args, "Which service do you want to see logs for?")
 
 		st, err := state.Load()
 		if err != nil {

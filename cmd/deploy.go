@@ -12,6 +12,7 @@ import (
 	"shipyard/internal/docker"
 	"shipyard/internal/envfile"
 	"shipyard/internal/git"
+	"shipyard/internal/prompt"
 	"shipyard/internal/state"
 	"shipyard/internal/ui"
 	shipyardUpdate "shipyard/internal/update"
@@ -53,7 +54,7 @@ var noHealthcheck bool
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
-	Short: "Deploy from a GitHub repo or Docker image",
+	Short: "Deploy from a GitHub repo or Docker image (run without flags for a wizard)",
 	Long: `Deploy from a GitHub repo or Docker image.
 
 Running deploy again for an existing service starts from its saved
@@ -66,7 +67,16 @@ else is preserved. --env merges into the existing variables.`,
 		// =========================
 
 		if repo == "" && image == "" {
-			ui.Fatal("specify --repo or --image")
+			if !prompt.Interactive() {
+				ui.Fatal("specify --repo or --image (or run in a terminal for the interactive wizard)")
+			}
+			if err := runDeployWizard(cmd.Flags()); err != nil {
+				if errors.Is(err, prompt.ErrAborted) {
+					ui.Info("aborted")
+					exitQuiet()
+				}
+				ui.Fatal("%s", err)
+			}
 		}
 		if repo != "" {
 			if err := deployment.ValidateRepo(repo); err != nil {

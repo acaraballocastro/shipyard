@@ -69,6 +69,19 @@ shipyard doctor
 
 ## Usage
 
+### Interactive mode
+
+Run commands without arguments and Shipyard asks for what it needs:
+
+```bash
+shipyard deploy      # step-by-step wizard, prints the equivalent command before deploying
+shipyard logs        # pick a service from a list (also restart, update, status, shell, delete)
+```
+
+Flags still work as before and skip the questions. Prompts are disabled when there is no terminal, with `--no-input`, or when `SHIPYARD_NO_INPUT` or `CI` is set.
+
+---
+
 ### Deploy a Docker image
 
 ```bash

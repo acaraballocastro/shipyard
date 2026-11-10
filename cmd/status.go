@@ -43,11 +43,11 @@ type dockerStats struct {
 var statusCmd = &cobra.Command{
 	Use:   "status [app]",
 	Short: "Show runtime status of a deployed service",
-	Args:  cobra.ExactArgs(1),
+	Args:  appArg,
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		appName := args[0]
+		appName := resolveApp(cmd, args, "Show status of which service?")
 
 		// =========================
 		// LOAD STATE
