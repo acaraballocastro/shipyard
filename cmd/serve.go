@@ -49,6 +49,9 @@ as a systemd service with "shipyard serve install" (done by server add).`,
 		if err := applyServeConfig(&opts); err != nil {
 			ui.Fatal("%s", err)
 		}
+		if !web.Built() {
+			ui.Warn("this binary has no web UI embedded (built without `make web`); the API works, the browser shows an error")
+		}
 		h := api.Handler(opts)
 		ui.Info("shipyard serve listening on %s", serveListen)
 		if err := listen(cmd.Context(), serveListen, h); err != nil {

@@ -51,7 +51,9 @@ jobs:
           GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: "0"
         run: |
+          test -f web/dist/index.html || { echo "web UI missing from web/dist"; exit 1; }
           go build -ldflags "-s -w -X shipyard/internal/version.Version=${{ github.ref_name }}" -o ${{ matrix.output }}
+          grep -q 'id="root"' ${{ matrix.output }} || { echo "web UI not embedded in ${{ matrix.output }}"; exit 1; }
           sha256sum ${{ matrix.output }} > ${{ matrix.output }}.sha256
 
       - name: Upload Release Binary

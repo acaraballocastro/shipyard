@@ -17,3 +17,10 @@ func FS() fs.FS {
 	}
 	return sub
 }
+
+// Built reports whether the frontend was embedded (a plain `go build`
+// without `make web` produces a binary without it).
+func Built() bool {
+	_, err := fs.Stat(FS(), "index.html")
+	return err == nil
+}
