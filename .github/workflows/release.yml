@@ -1,9 +1,14 @@
 name: Release
 
+# Releases are built on the server with `make release` and uploaded with
+# `gh release create`. This workflow only runs when started by hand
+# (Actions → Release → Run workflow) for a tag that already exists.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (e.g. v0.5.0)"
+        required: true
 
 permissions:
   contents: write
@@ -28,6 +33,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -52,13 +59,14 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           test -f web/dist/index.html || { echo "web UI missing from web/dist"; exit 1; }
-          go build -ldflags "-s -w -X shipyard/internal/version.Version=${{ github.ref_name }}" -o ${{ matrix.output }}
+          go build -ldflags "-s -w -X shipyard/internal/version.Version=${{ inputs.tag }}" -o ${{ matrix.output }}
           grep -q 'id="root"' ${{ matrix.output }} || { echo "web UI not embedded in ${{ matrix.output }}"; exit 1; }
           sha256sum ${{ matrix.output }} > ${{ matrix.output }}.sha256
 
       - name: Upload Release Binary
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag }}
           files: |
             ${{ matrix.output }}
             ${{ matrix.output }}.sha256
