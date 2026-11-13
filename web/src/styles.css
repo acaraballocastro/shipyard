@@ -269,3 +269,7 @@ td.center-cell { text-align: center; padding: 28px; }
 .tag.route { margin-left: 4px; }
 .tag.route.fallback { color: var(--warn); border-color: var(--warn); background: var(--warn-bg); }
 .page-head .tag.route { margin-left: 6px; vertical-align: 1px; }
+
+/* Other containers */
+.section-toggle { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: 0; border-bottom: 1px solid var(--border); padding: 12px 16px; color: var(--text); text-align: left; }
+.section-toggle:hover { background: var(--bg); }

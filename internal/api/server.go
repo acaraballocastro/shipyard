@@ -128,7 +128,30 @@ func Handler(o Options) http.Handler {
 		st, err := b.Status(r.Context(), r.PathValue("app"))
 		respond(w, st, err)
 	}))
-	mux.HandleFunc("GET /api/v1/servers/{server}/apps/{app}/logs", h.backend(h.logs))
+	mux.HandleFunc("GET /api/v1/servers/{server}/apps/{app}/logs", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		h.streamLogs(w, r, func(ctx context.Context, o core.LogsOptions, out io.Writer) error {
+			return b.Logs(ctx, r.PathValue("app"), o, out)
+		})
+	}))
+	mux.HandleFunc("GET /api/v1/servers/{server}/containers", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		cs, err := b.Containers(r.Context())
+		if cs == nil && err == nil {
+			cs = []core.Container{}
+		}
+		respond(w, cs, err)
+	}))
+	mux.HandleFunc("POST /api/v1/servers/{server}/containers/{name}/actions/{action}", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		if err := b.ContainerAction(r.Context(), r.PathValue("name"), r.PathValue("action")); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	mux.HandleFunc("GET /api/v1/servers/{server}/containers/{name}/logs", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		h.streamLogs(w, r, func(ctx context.Context, o core.LogsOptions, out io.Writer) error {
+			return b.ContainerLogs(ctx, r.PathValue("name"), o, out)
+		})
+	}))
 
 	mux.HandleFunc("POST /api/v1/servers/{server}/apps/{app}/actions/{action}", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
 		job, err := b.StartAction(r.Context(), r.PathValue("app"), r.PathValue("action"))
@@ -349,7 +372,7 @@ func secure(r *http.Request) bool {
 // logs streams lines as SSE "data:" messages. An "event: error" message
 // carries a failure; a comment ping every 15s keeps proxies from closing
 // idle streams.
-func (h *handler) logs(w http.ResponseWriter, r *http.Request, b Backend) {
+func (h *handler) streamLogs(w http.ResponseWriter, r *http.Request, run func(context.Context, core.LogsOptions, io.Writer) error) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
@@ -372,7 +395,7 @@ func (h *handler) logs(w http.ResponseWriter, r *http.Request, b Backend) {
 	stop := sw.keepAlive()
 	defer stop()
 
-	err := b.Logs(r.Context(), r.PathValue("app"), opts, sw)
+	err := run(r.Context(), opts, sw)
 	sw.flushPartial()
 	if err != nil && r.Context().Err() == nil {
 		sw.event("error", err.Error())
@@ -521,7 +544,7 @@ func respond(w http.ResponseWriter, v any, err error) {
 	if err != nil {
 		var re *RemoteError
 		switch {
-		case errors.Is(err, core.ErrNotFound), errors.Is(err, ErrJobNotFound):
+		case errors.Is(err, core.ErrNotFound), errors.Is(err, ErrJobNotFound), errors.Is(err, core.ErrContainerNotFound):
 			writeError(w, http.StatusNotFound, err.Error())
 		case errors.Is(err, ErrBusy):
 			writeError(w, http.StatusConflict, err.Error())

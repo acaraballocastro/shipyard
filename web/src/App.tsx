@@ -6,6 +6,7 @@ import { Login } from "./pages/Login";
 import { ServerPage } from "./pages/ServerPage";
 import { AppPage } from "./pages/AppPage";
 import { DeployPage } from "./pages/DeployPage";
+import { ContainerPage } from "./pages/ContainerPage";
 import { ToastProvider } from "./components/Toast";
 import { useTheme } from "./hooks/useTheme";
 import { useShortcuts } from "./hooks/useShortcuts";
@@ -74,6 +75,7 @@ export function App() {
             <Route path="/servers/:server" element={<ServerPage />} />
             <Route path="/servers/:server/deploy" element={<DeployPage />} />
             <Route path="/servers/:server/apps/:app" element={<AppPage />} />
+            <Route path="/servers/:server/containers/:name" element={<ContainerPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

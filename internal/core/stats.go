@@ -21,29 +21,19 @@ type Stats struct {
 	PIDs     int     `json:"pids"`
 }
 
-// Stats samples every running container of the registered services in a
-// single `docker stats` call, keyed by service name. Stopped services are
-// absent from the result.
+// Stats samples every running container in a single `docker stats` call,
+// keyed by container name (a shipyard service's container is named after
+// it). Stopped containers are absent from the result.
 func (s *Service) Stats(ctx context.Context) (map[string]Stats, error) {
-	apps, err := s.List()
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]Stats{}
-	if len(apps) == 0 {
-		return out, nil
-	}
-	known := make(map[string]bool, len(apps))
-	for _, a := range apps {
-		known[a.Name] = true
-	}
 	raw, err := exec.CommandContext(ctx, "docker", "stats", "--no-stream", "--format", "{{json .}}").Output()
 	if err != nil {
 		return nil, fmt.Errorf("docker stats: %w", err)
 	}
-	return parseStats(raw, known), nil
+	return parseStats(raw, nil), nil
 }
 
+// parseStats reads `docker stats` JSON lines; known, when not nil, keeps
+// only those names.
 func parseStats(raw []byte, known map[string]bool) map[string]Stats {
 	out := map[string]Stats{}
 	sc := bufio.NewScanner(bytes.NewReader(raw))
@@ -51,7 +41,7 @@ func parseStats(raw []byte, known map[string]bool) map[string]Stats {
 		var r struct {
 			Name, CPUPerc, MemPerc, MemUsage, NetIO, BlockIO, PIDs string
 		}
-		if json.Unmarshal(sc.Bytes(), &r) != nil || !known[r.Name] {
+		if json.Unmarshal(sc.Bytes(), &r) != nil || r.Name == "" || (known != nil && !known[r.Name]) {
 			continue
 		}
 		pids, _ := strconv.Atoi(r.PIDs)

@@ -4,7 +4,8 @@ import { api } from "../api";
 const MAX_LINES = 5000;
 
 // Live logs over Server-Sent Events; reconnects automatically.
-export function Logs({ server, app }: { server: string; app: string }) {
+// url defaults to the service's logs; pass one for a plain container.
+export function Logs({ server, app, url }: { server: string; app: string; url?: string }) {
   const [lines, setLines] = useState<string[]>([]);
   const [state, setState] = useState<"connecting" | "live" | "ended" | "error">("connecting");
   const [error, setError] = useState("");
@@ -14,7 +15,7 @@ export function Logs({ server, app }: { server: string; app: string }) {
   useEffect(() => {
     setLines([]);
     setState("connecting");
-    const es = new EventSource(api.logsUrl(server, app, 300));
+    const es = new EventSource(url ?? api.logsUrl(server, app, 300));
     let buf: string[] = [];
     // Batch updates: busy containers can emit hundreds of lines per second.
     const flush = setInterval(() => {
@@ -46,7 +47,7 @@ export function Logs({ server, app }: { server: string; app: string }) {
       clearInterval(flush);
       es.close();
     };
-  }, [server, app]);
+  }, [server, app, url]);
 
   useEffect(() => {
     if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;

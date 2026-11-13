@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type AppStatus, type Job } from "../api";
+import { api, memAvailable, type AppStatus, type Job } from "../api";
 import { Actions } from "../components/Actions";
 import { JobPanel, jobLabel } from "../components/JobPanel";
 import { ErrorBox } from "../App";
@@ -130,7 +130,11 @@ function Metrics({ server, app, running }: { server: string; app: string; runnin
       <MetricCard label="CPU" value={cur ? `${cur.cpu.toFixed(1)}%` : "…"} sub="of one core">
         <Sparkline values={hist.map((h) => h.cpu)} floor={5} height={44} label="CPU over the last minutes" />
       </MetricCard>
-      <MetricCard label="Memory" value={cur ? `${cur.memPerc.toFixed(1)}%` : "…"} sub={cur?.memUsage ?? ""}>
+      <MetricCard
+        label="Memory"
+        value={cur ? (memAvailable(cur) ? `${cur.memPerc.toFixed(1)}%` : "n/a") : "…"}
+        sub={cur ? (memAvailable(cur) ? cur.memUsage : "not reported by Docker (cgroup memory disabled?)") : ""}
+      >
         <Sparkline values={hist.map((h) => h.memPerc)} floor={5} height={44} label="Memory over the last minutes" />
       </MetricCard>
       <MetricCard label="Network rx / tx" value={cur?.netIO ?? "…"} sub="since start" />

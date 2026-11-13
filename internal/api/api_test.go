@@ -53,6 +53,22 @@ func (fakeBackend) Stats(context.Context) (map[string]core.Stats, error) {
 func (fakeBackend) StatsHistory(context.Context) (map[string][]Sample, error) {
 	return map[string][]Sample{"web": {{T: 1, Stats: core.Stats{CPU: 1}}}}, nil
 }
+func (fakeBackend) Containers(context.Context) ([]core.Container, error) {
+	return []core.Container{{Name: "cloudflared", State: "running"}, {Name: "web", Managed: true, App: "web"}}, nil
+}
+func (fakeBackend) ContainerAction(_ context.Context, name, action string) error {
+	if name != "cloudflared" {
+		return fmt.Errorf("%w: %s", core.ErrContainerNotFound, name)
+	}
+	if action != "restart" {
+		return fmt.Errorf("%w: %s", ErrUnknownAction, action)
+	}
+	return nil
+}
+func (fakeBackend) ContainerLogs(_ context.Context, name string, o core.LogsOptions, w io.Writer) error {
+	fmt.Fprintf(w, "cf-line tail=%d\n", o.Tail)
+	return nil
+}
 func (fakeBackend) Job(context.Context, string) (*Job, error) { return nil, ErrJobNotFound }
 func (fakeBackend) CancelJob(context.Context, string) error   { return ErrJobNotFound }
 func (fakeBackend) JobEvents(context.Context, string, func(string, string) error) error {

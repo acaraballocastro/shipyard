@@ -209,8 +209,20 @@ func (s *Service) Delete(ctx context.Context, name string, p events.Progress) er
 		return err
 	}
 	p.Step("down", "stopping containers")
-	if err := docker.ComposeDown(ctx, app.Path, p.Writer()); err != nil {
-		return fmt.Errorf("docker compose down: %w", err)
+	if _, err := os.Stat(app.Path); err == nil {
+		if err := docker.ComposeDown(ctx, app.Path, p.Writer()); err != nil {
+			return fmt.Errorf("docker compose down: %w", err)
+		}
+	} else {
+		// Directory removed by hand: stop the project by name and remove
+		// any leftover container, so the service can still be deleted.
+		p.Warn("%s is missing; removing the containers by name", app.Path)
+		if err := docker.ComposeDownProject(ctx, filepath.Base(app.Path), p.Writer()); err != nil {
+			p.Warn("docker compose -p %s down: %s", filepath.Base(app.Path), err)
+		}
+		if err := docker.RemoveContainer(ctx, name, p.Writer()); err != nil {
+			return fmt.Errorf("removing container %s: %w", name, err)
+		}
 	}
 	p.Step("clean", "removing files")
 	if err := os.RemoveAll(app.Path); err != nil {

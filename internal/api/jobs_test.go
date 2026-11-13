@@ -235,3 +235,31 @@ func TestJobsListAndDeployLock(t *testing.T) {
 		t.Fatal("filter by app failed")
 	}
 }
+
+func TestContainersThroughGateway(t *testing.T) {
+	pi := newServer(t, reg{LocalServer: fakeBackend{}})
+	gw := newServer(t, reg{"pi": Remote{URL: pi.URL, Token: tok}}, func(o *Options) { o.Token = "gw" })
+	base := gw.URL + "/api/v1/servers/pi"
+
+	_, body := get(t, base+"/containers", "gw")
+	var cs []core.Container
+	if json.Unmarshal([]byte(body), &cs) != nil || len(cs) != 2 || cs[0].Name != "cloudflared" {
+		t.Fatalf("containers: %s", body)
+	}
+	if r, b := post(t, base+"/containers/cloudflared/actions/restart", "gw", true); r.StatusCode != 204 {
+		t.Fatalf("restart: %d %s", r.StatusCode, b)
+	}
+	if r, _ := post(t, base+"/containers/ghost/actions/restart", "gw", true); r.StatusCode != 404 {
+		t.Fatalf("missing container: %d", r.StatusCode)
+	}
+	if r, _ := post(t, base+"/containers/cloudflared/actions/rm", "gw", true); r.StatusCode != 400 {
+		t.Fatalf("unknown action: %d", r.StatusCode)
+	}
+	if r, _ := post(t, base+"/containers/cloudflared/actions/restart", "gw", false); r.StatusCode != 403 {
+		t.Fatalf("csrf: %d", r.StatusCode)
+	}
+	_, logs := get(t, base+"/containers/cloudflared/logs?tail=9", "gw")
+	if !strings.Contains(logs, "data: cf-line tail=9") {
+		t.Fatalf("logs:\n%s", logs)
+	}
+}

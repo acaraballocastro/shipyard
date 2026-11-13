@@ -8,6 +8,8 @@ import { Sparkline } from "../components/Sparkline";
 import { statsHistory, useStats } from "../hooks/useStats";
 import { useShortcuts } from "../hooks/useShortcuts";
 import { OutdatedBanner } from "../components/OutdatedBanner";
+import { OtherContainers } from "../components/OtherContainers";
+import { memAvailable } from "../api";
 
 type Filter = "all" | "running" | "issues";
 
@@ -154,7 +156,10 @@ export function ServerPage() {
                       </Metric>
                     </td>
                     <td className="hide-sm">
-                      <Metric value={cur ? `${cur.memPerc.toFixed(1)}%` : "–"} title={cur?.memUsage}>
+                      <Metric
+                        value={cur ? (memAvailable(cur) ? `${cur.memPerc.toFixed(1)}%` : "n/a") : "–"}
+                        title={cur && !memAvailable(cur) ? "Docker reports no memory usage (on a Raspberry Pi: enable cgroup_enable=memory)" : cur?.memUsage}
+                      >
                         <Sparkline values={hist.map((h) => h.memPerc)} floor={5} label={`${a.name} memory`} />
                       </Metric>
                     </td>
@@ -196,6 +201,7 @@ export function ServerPage() {
           </table>
         </div>
       )}
+      <OtherContainers server={server} query={query} />
     </>
   );
 }

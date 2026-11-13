@@ -27,7 +27,8 @@ import (
 //
 //	1: jobs (restart, update, delete)
 //	2: deploy, stats + history, job history
-const APILevel = 2
+//	3: every Docker container (list, start/stop/restart, logs)
+const APILevel = 3
 
 // Info describes a shipyard host.
 type Info struct {
@@ -49,6 +50,12 @@ type Backend interface {
 
 	// Stats samples resource usage of every running service.
 	Stats(ctx context.Context) (map[string]core.Stats, error)
+	// Containers lists every Docker container on the server.
+	Containers(ctx context.Context) ([]core.Container, error)
+	// ContainerAction starts, stops or restarts any container.
+	ContainerAction(ctx context.Context, name, action string) error
+	// ContainerLogs writes a container's log lines to w.
+	ContainerLogs(ctx context.Context, name string, opts core.LogsOptions, w io.Writer) error
 	// StatsHistory returns the recent samples per service.
 	StatsHistory(ctx context.Context) (map[string][]Sample, error)
 
@@ -75,6 +82,21 @@ type Local struct {
 
 func (l Local) StartAction(_ context.Context, app, action string) (*Job, error) {
 	return l.Jobs.Start(app, action)
+}
+
+func (l Local) Containers(ctx context.Context) ([]core.Container, error) {
+	return l.Svc.Containers(ctx)
+}
+
+func (l Local) ContainerAction(ctx context.Context, name, action string) error {
+	if !core.ContainerActions[action] {
+		return fmt.Errorf("%w: %s", ErrUnknownAction, action)
+	}
+	return l.Svc.ContainerAction(ctx, name, action, io.Discard)
+}
+
+func (l Local) ContainerLogs(ctx context.Context, name string, opts core.LogsOptions, w io.Writer) error {
+	return l.Svc.ContainerLogs(ctx, name, opts, w)
 }
 
 func (l Local) StartDeploy(_ context.Context, req core.DeployRequest) (*Job, error) {
@@ -232,6 +254,8 @@ func (r Remote) sendBody(ctx context.Context, client *http.Client, method, path 
 		switch {
 		case resp.StatusCode == http.StatusNotFound && strings.Contains(e.Error, core.ErrNotFound.Error()):
 			return nil, fmt.Errorf("%w: %s", core.ErrNotFound, path)
+		case resp.StatusCode == http.StatusNotFound && strings.Contains(e.Error, core.ErrContainerNotFound.Error()):
+			return nil, fmt.Errorf("%w: %s", core.ErrContainerNotFound, path)
 		case resp.StatusCode == http.StatusNotFound && strings.Contains(e.Error, ErrJobNotFound.Error()):
 			return nil, fmt.Errorf("%w: %s", ErrJobNotFound, path)
 		case resp.StatusCode == http.StatusConflict:
@@ -240,7 +264,7 @@ func (r Remote) sendBody(ctx context.Context, client *http.Client, method, path 
 			return nil, fmt.Errorf("%w: %s", ErrUnknownAction, e.Error)
 		case resp.StatusCode == http.StatusBadRequest && strings.Contains(e.Error, ErrInvalidRequest.Error()):
 			return nil, fmt.Errorf("%w: %s", ErrInvalidRequest, strings.TrimPrefix(e.Error, ErrInvalidRequest.Error()+": "))
-		case resp.StatusCode == http.StatusNotFound && (method != http.MethodGet || path == "/stats" || path == "/stats/history" || path == "/jobs"):
+		case resp.StatusCode == http.StatusNotFound && (method != http.MethodGet || path == "/stats" || path == "/stats/history" || path == "/jobs" || path == "/containers"):
 			// An older shipyard serve without this endpoint.
 			return nil, &RemoteError{Status: resp.StatusCode, Message: "the server's shipyard is too old for this action; update it"}
 		}
@@ -275,12 +299,33 @@ func (r Remote) Status(ctx context.Context, app string) (*core.Status, error) {
 
 // Logs relays the remote SSE stream as plain lines.
 func (r Remote) Logs(ctx context.Context, app string, opts core.LogsOptions, w io.Writer) error {
+	return r.relayLogs(ctx, "/apps/"+url.PathEscape(app)+"/logs", opts, w)
+}
+
+func (r Remote) ContainerLogs(ctx context.Context, name string, opts core.LogsOptions, w io.Writer) error {
+	return r.relayLogs(ctx, "/containers/"+url.PathEscape(name)+"/logs", opts, w)
+}
+
+func (r Remote) Containers(ctx context.Context) ([]core.Container, error) {
+	var out []core.Container
+	return out, r.getJSON(ctx, "/containers", &out)
+}
+
+func (r Remote) ContainerAction(ctx context.Context, name, action string) error {
+	resp, err := r.send(ctx, r.client(), http.MethodPost, "/containers/"+url.PathEscape(name)+"/actions/"+url.PathEscape(action), nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+func (r Remote) relayLogs(ctx context.Context, path string, opts core.LogsOptions, w io.Writer) error {
 	q := url.Values{"tail": {strconv.Itoa(opts.Tail)}}
 	if opts.Follow {
 		q.Set("follow", "1")
 	}
-	// No client timeout: the stream lives as long as ctx.
-	resp, err := r.do(ctx, r.streamClient(), "/apps/"+url.PathEscape(app)+"/logs", q)
+	resp, err := r.do(ctx, r.streamClient(), path, q)
 	if err != nil {
 		return err
 	}

@@ -18,7 +18,7 @@ export interface RouteStatus {
 
 // The API level this UI needs (internal/api.APILevel). The UI ships inside
 // the same binary, so a server reporting less runs an older shipyard.
-export const REQUIRED_API = 2;
+export const REQUIRED_API = 3;
 
 export interface HostInfo {
   hostname: string;
@@ -90,6 +90,25 @@ export interface Stats {
   netIO: string;
   blockIO: string;
   pids: number;
+}
+
+// Any Docker container on the server (core.Container).
+export interface Container {
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  ports?: string;
+  project?: string;
+  managed: boolean;
+  app?: string;
+}
+export type ContainerAction = "start" | "stop" | "restart";
+
+// "n/a" when Docker reports no memory accounting (common on Raspberry Pi
+// without cgroup_enable=memory), instead of a misleading 0%.
+export function memAvailable(s?: Stats) {
+  return !!s && !/^0B\s*\/\s*0B/.test(s.memUsage ?? "");
 }
 
 export interface Sample extends Stats {
@@ -170,6 +189,11 @@ export const api = {
     request<void>(`/servers/${enc(server)}/jobs/${enc(id)}/cancel`, { method: "POST" }),
   jobEventsUrl: (server: string, id: string) => `/api/v1/servers/${enc(server)}/jobs/${enc(id)}/events`,
 
+  containers: (server: string) => request<Container[]>(`/servers/${enc(server)}/containers`),
+  containerAction: (server: string, name: string, action: ContainerAction) =>
+    request<void>(`/servers/${enc(server)}/containers/${enc(name)}/actions/${action}`, { method: "POST" }),
+  containerLogsUrl: (server: string, name: string, tail: number) =>
+    `/api/v1/servers/${enc(server)}/containers/${enc(name)}/logs?follow=1&tail=${tail}`,
   logsUrl: (server: string, app: string, tail: number) =>
     `/api/v1/servers/${enc(server)}/apps/${enc(app)}/logs?follow=1&tail=${tail}`,
 };

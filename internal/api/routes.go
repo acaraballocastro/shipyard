@@ -124,8 +124,8 @@ func (r *Routes) failed(i int, err error) {
 // transport fails fast on unreachable routes: a blocked IP usually shows
 // up as a dial or TLS handshake that never completes.
 var transport = &http.Transport{
-	Proxy: http.ProxyFromEnvironment,
-	DialContext: (&dialer{d: net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}}).DialContext,
+	Proxy:                 http.ProxyFromEnvironment,
+	DialContext:           (&dialer{d: net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}}).DialContext,
 	TLSHandshakeTimeout:   7 * time.Second,
 	ResponseHeaderTimeout: 0, // streams and slow handlers are bounded by the client/ctx
 	IdleConnTimeout:       90 * time.Second,
