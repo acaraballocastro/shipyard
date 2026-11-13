@@ -39,11 +39,15 @@ type DeployRequest struct {
 	InternalPort  *string   `json:"internalPort,omitempty"`
 	Ports         *[]string `json:"ports,omitempty"`
 	Volumes       *[]string `json:"volumes,omitempty"`
+	// Command overrides the image's default command, one arg per item.
+	Command *[]string `json:"command,omitempty"`
 
 	// EnvFiles replaces the env file list (paths on this host).
 	EnvFiles *[]string `json:"envFiles,omitempty"`
 	// Env is merged into the service .env (0600); never stored in yaml.
 	Env map[string]string `json:"env,omitempty"`
+	// UnsetEnv removes variables from the service .env.
+	UnsetEnv []string `json:"unsetEnv,omitempty"`
 
 	// BuildArgs are KEY=VALUE, or KEY to read from the environment.
 	BuildArgs *[]string `json:"buildArgs,omitempty"`
@@ -162,7 +166,7 @@ func (s *Service) Deploy(ctx context.Context, req DeployRequest, p events.Progre
 	// BUILD + COMPOSE + UP + VERIFY
 	// =========================
 
-	cs, err := s.Runner.Apply(ctx, dir, cfg, update.ApplyOptions{Build: true, SetEnv: req.Env}, p)
+	cs, err := s.Runner.Apply(ctx, dir, cfg, update.ApplyOptions{Build: true, SetEnv: req.Env, UnsetEnv: req.UnsetEnv}, p)
 	if err != nil {
 		return nil, fmt.Errorf("deploy: %w", err)
 	}
@@ -263,6 +267,7 @@ func (r DeployRequest) apply(cfg *deployment.Config, existing bool, name, image 
 	setStr(&cfg.Deploy.InternalPort, r.InternalPort)
 	setList(&cfg.Deploy.Ports, r.Ports)
 	setList(&cfg.Deploy.Volumes, r.Volumes)
+	setList(&cfg.Deploy.Command, r.Command)
 	setStr(&cfg.Deploy.Entrypoint, r.Entrypoint)
 	if r.TLS != nil {
 		cfg.Deploy.TLS = *r.TLS

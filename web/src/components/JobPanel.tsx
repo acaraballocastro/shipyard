@@ -112,7 +112,7 @@ export function JobPanel({
 }
 
 export function jobLabel(a: Job["action"]) {
-  return { upgrade: "Update", deploy: "Deploy", restart: "Restart", update: "Update", delete: "Delete" }[a] ?? a;
+  return { prune: "Clean up", adopt: "Adopt", upgrade: "Update", deploy: "Deploy", restart: "Restart", update: "Update", delete: "Delete" }[a] ?? a;
 }
 
 function badge(s: Job["status"]) {

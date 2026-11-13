@@ -263,3 +263,18 @@ func TestContainersThroughGateway(t *testing.T) {
 		t.Fatalf("logs:\n%s", logs)
 	}
 }
+
+func TestEnvThroughGateway(t *testing.T) {
+	pi := newServer(t, reg{LocalServer: fakeBackend{}})
+	gw := newServer(t, reg{"pi": Remote{URL: pi.URL, Token: tok}}, func(o *Options) { o.Token = "gw" })
+	r, body := get(t, gw.URL+"/api/v1/servers/pi/apps/web/env", "gw")
+	if r.StatusCode != 200 || !strings.Contains(body, `"DB_URL":"postgres://x"`) || r.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("env: %d %v %s", r.StatusCode, r.Header, body)
+	}
+	if r, _ := get(t, gw.URL+"/api/v1/servers/pi/apps/ghost/env", "gw"); r.StatusCode != 404 {
+		t.Fatalf("missing app: %d", r.StatusCode)
+	}
+	if r, _ := get(t, gw.URL+"/api/v1/servers/pi/apps/web/env", ""); r.StatusCode != 401 {
+		t.Fatalf("env without auth: %d", r.StatusCode)
+	}
+}

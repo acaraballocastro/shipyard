@@ -18,7 +18,7 @@ export interface RouteStatus {
 
 // The API level this UI needs (internal/api.APILevel). The UI ships inside
 // the same binary, so a server reporting less runs an older shipyard.
-export const REQUIRED_API = 3;
+export const REQUIRED_API = 5;
 
 export interface HostInfo {
   hostname: string;
@@ -52,12 +52,37 @@ export interface AppStatus extends App {
 }
 
 // deployment.yaml as JSON (Go field names).
+// deployment.yaml as JSON (Go field names, no json tags: every field is
+// present and empty lists/maps come as null).
 export interface DeploymentConfig {
-  Source: { Type: string; Repository?: string };
-  Build: { Platform?: string };
-  Deploy: { Mode: string; Entrypoint?: string; TLS?: boolean };
-  Env: { Files?: string[]; Keys?: string[] };
-  Healthcheck: { Enabled: boolean; Command?: string };
+  Version: number;
+  Name: string;
+  Image: string;
+  Source: { Type: "git" | "image" | string; Repository?: string };
+  Build: { Platform?: string; Args?: Record<string, string> | null; ArgsFromEnv?: string[] | null };
+  Deploy: {
+    Mode: string;
+    Domain?: string;
+    Network?: string;
+    InternalPort?: string;
+    Entrypoint?: string;
+    TLS?: boolean;
+    CertResolver?: string;
+    RouterName?: string;
+    Middlewares?: string[] | null;
+    Ports?: string[] | null;
+    Volumes?: string[] | null;
+    Command?: string[] | null;
+  };
+  Env: { Files?: string[] | null; Keys?: string[] | null };
+  Healthcheck: {
+    Enabled: boolean;
+    Command?: string;
+    Interval?: string;
+    Timeout?: string;
+    Retries?: number;
+    StartPeriod?: string;
+  };
 }
 
 export type JobStatus = "running" | "succeeded" | "failed" | "canceled";
@@ -66,7 +91,7 @@ export type Action = "restart" | "update" | "delete";
 export interface Job {
   id: string;
   app: string;
-  action: Action | "deploy" | "upgrade";
+  action: Action | "deploy" | "upgrade" | "prune" | "adopt";
   status: JobStatus;
   error?: string;
   startedAt: string;
@@ -90,6 +115,37 @@ export interface Stats {
   netIO: string;
   blockIO: string;
   pids: number;
+}
+
+// The machine running the services (core.Host). Zero means unknown.
+export interface Host {
+  cpu: number;
+  cores: number;
+  load: [number, number, number];
+  memTotal: number;
+  memUsed: number;
+  swapUsed: number;
+  temp?: number;
+  uptime: number;
+  disks: { path: string; total: number; used: number }[] | null;
+  docker?: { images: number; imagesReclaim: number; containers: number; volumes: number; buildCache: number; buildCacheReclaim: number };
+  memoryCgroup: boolean;
+}
+
+export interface WebhookInfo {
+  enabled: boolean;
+  branch?: string;
+  path?: string;
+  url?: string;
+  secret?: string; // only right after enabling or rotating
+  last?: { at: string; event: string; ref?: string; commit?: string; result: string; detail?: string; jobId?: string };
+}
+
+export interface AdoptPlan {
+  container: string;
+  request: DeployRequest;
+  warnings: string[];
+  blockers: string[];
 }
 
 // Any Docker container on the server (core.Container).
@@ -128,13 +184,22 @@ export interface DeployRequest {
   internalPort?: string;
   ports?: string[];
   volumes?: string[];
+  command?: string[];
+  envFiles?: string[];
   env?: Record<string, string>;
+  unsetEnv?: string[];
   buildArgs?: string[];
   platform?: string;
   entrypoint?: string;
   tls?: boolean;
   certResolver?: string;
+  routerName?: string;
+  middlewares?: string[];
   healthcheckCmd?: string;
+  healthcheckInterval?: string;
+  healthcheckTimeout?: string;
+  healthcheckRetries?: number;
+  healthcheckStartPeriod?: string;
   noHealthcheck?: boolean;
 }
 
@@ -178,6 +243,21 @@ export const api = {
   startAction: (server: string, app: string, action: Action) =>
     request<Job>(`/servers/${enc(server)}/apps/${enc(app)}/actions/${action}`, { method: "POST" }),
   stats: (server: string) => request<Record<string, Stats>>(`/servers/${enc(server)}/stats`),
+  host: (server: string) => request<Host>(`/servers/${enc(server)}/host`),
+  prune: (server: string, all: boolean) =>
+    request<Job>(`/servers/${enc(server)}/prune`, { method: "POST", body: JSON.stringify({ all }) }),
+  webhook: (server: string, app: string) => request<WebhookInfo>(`/servers/${enc(server)}/apps/${enc(app)}/webhook`),
+  setWebhook: (server: string, app: string, branch: string, rotate = false) =>
+    request<WebhookInfo>(`/servers/${enc(server)}/apps/${enc(app)}/webhook`, {
+      method: "PUT",
+      body: JSON.stringify({ branch, rotate }),
+    }),
+  deleteWebhook: (server: string, app: string) =>
+    request<void>(`/servers/${enc(server)}/apps/${enc(app)}/webhook`, { method: "DELETE" }),
+  adoptPlan: (server: string, name: string) => request<AdoptPlan>(`/servers/${enc(server)}/containers/${enc(name)}/adopt`),
+  adopt: (server: string, name: string, req: DeployRequest) =>
+    request<Job>(`/servers/${enc(server)}/containers/${enc(name)}/adopt`, { method: "POST", body: JSON.stringify(req) }),
+  env: (server: string, app: string) => request<Record<string, string>>(`/servers/${enc(server)}/apps/${enc(app)}/env`),
   statsHistory: (server: string) => request<Record<string, Sample[]>>(`/servers/${enc(server)}/stats/history`),
   upgrade: (server: string) => request<Job>(`/servers/${enc(server)}/upgrade`, { method: "POST" }),
   deploy: (server: string, req: DeployRequest) =>
@@ -197,3 +277,15 @@ export const api = {
   logsUrl: (server: string, app: string, tail: number) =>
     `/api/v1/servers/${enc(server)}/apps/${enc(app)}/logs?follow=1&tail=${tail}`,
 };
+
+// bytes renders a size: "1.2 GB", "512 MB".
+export function bytes(n?: number): string {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1000 && i < u.length - 1) {
+    n /= 1000;
+    i++;
+  }
+  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
+}

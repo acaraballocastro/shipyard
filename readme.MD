@@ -94,6 +94,9 @@ shipyard ui            # on your Mac: opens the dashboard in the browser
 * **Deploy from the browser**: an image or a GitHub repository, with ports or a Traefik domain, env vars, volumes and a healthcheck. Progress and build output stream live. **Redeploy…** on a service changes only the fields you fill in.
 * Restart, update and delete run in the background; each service has an **Activity** timeline whose entries replay their full output. History survives restarts (`~/.shipyard/jobs/`).
 * Search and filter services; keyboard shortcuts (`/` search, `n` new deploy, `?` help); light, dark or system theme.
+* **Server panel**: CPU, memory, disks, temperature (Raspberry Pi) and uptime, plus Docker disk usage with **Clean up…** (dangling images and build cache, optionally every unused image; containers and volumes are never touched).
+* **Every container** on the server is listed, not only shipyard services. **Adopt into shipyard…** turns one into a service, prefilled from the running container (image, command, env, ports, volumes, Traefik labels). The original is stopped and kept until the new service is up; if the deployment fails it is restored as it was.
+* **Auto-deploy on push** for repository services: enable it on the service page, add the webhook on GitHub with the URL and secret shown (once), and every push to the branch redeploys. Deliveries are verified with GitHub's HMAC signature.
 * When a server runs an older shipyard, the UI says so and offers **Update** (over SSH; needs passwordless `sudo` on the server, otherwise run `shipyard server upgrade <name>`).
 * `shipyard server add` offers to enable the API on the server: it installs `shipyard serve` as a systemd service on port 7878 and stores its URL and token in your `~/.shipyard.yaml`.
 * The browser only talks to `shipyard ui` on `127.0.0.1` (one-time token, HttpOnly cookie); server tokens never reach it.
@@ -137,6 +140,8 @@ With a `cloudflared` tunnel already running on the server:
    ```
 
 By default you need both Access and the shipyard token. To sign in from the browser (e.g. your phone) with just your Access login, add `--login --allow you@example.com`. Sign out then ends the Access session too. Settings live in `~/.shipyard/serve.yaml` on the server; `shipyard serve cloudflare --disable` removes them.
+
+**GitHub webhooks behind Access**: GitHub cannot log in to Access, so add a second Access application for `shipyard.example.com/hooks/` with a **Bypass** policy. Shipyard skips the Access check for `/hooks/` only, and every delivery must carry a valid GitHub signature made with that service's secret (stored in `~/.shipyard/webhooks.yaml`, 0600).
 
 #### Reaching a server from anywhere (routes and failover)
 

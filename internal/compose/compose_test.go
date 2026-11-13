@@ -123,3 +123,18 @@ func TestGenerateLegacyAPI(t *testing.T) {
 	}
 	_ = os.RemoveAll(dir)
 }
+
+func TestNamedVolumesDeclaredWithExactName(t *testing.T) {
+	c, err := Build(Spec{ServiceName: "app", Image: "x", Mode: "local",
+		Volumes: []string{"pgdata:/var/lib/postgresql/data", "/srv/x:/x:ro", "./rel:/r"},
+		Command: []string{"tunnel", "run"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Volumes) != 1 || c.Volumes["pgdata"].Name != "pgdata" {
+		t.Fatalf("volumes: %+v", c.Volumes)
+	}
+	if got := c.Services["app"].Command; len(got) != 2 || got[0] != "tunnel" {
+		t.Fatalf("command: %v", got)
+	}
+}

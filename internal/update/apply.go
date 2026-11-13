@@ -44,6 +44,8 @@ type ApplyOptions struct {
 	// SetEnv merges variables into the deployment-local .env file. Existing
 	// variables not listed here are preserved.
 	SetEnv map[string]string
+	// UnsetEnv removes variables from the .env file (applied before SetEnv).
+	UnsetEnv []string
 }
 
 // Apply validates cfg, builds the image when needed, writes the
@@ -169,10 +171,13 @@ func writeFiles(dir string, cfg *deployment.Config, opts ApplyOptions) error {
 		}
 		vars = existing
 	}
+	for _, k := range opts.UnsetEnv {
+		delete(vars, k)
+	}
 	for k, v := range opts.SetEnv {
 		vars[k] = v
 	}
-	if len(opts.SetEnv) > 0 {
+	if len(opts.SetEnv) > 0 || len(opts.UnsetEnv) > 0 {
 		if err := envfile.Write(localEnv, vars); err != nil {
 			return fmt.Errorf("writing %s: %w", localEnv, err)
 		}

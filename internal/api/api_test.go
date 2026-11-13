@@ -53,6 +53,31 @@ func (fakeBackend) Stats(context.Context) (map[string]core.Stats, error) {
 func (fakeBackend) StatsHistory(context.Context) (map[string][]Sample, error) {
 	return map[string][]Sample{"web": {{T: 1, Stats: core.Stats{CPU: 1}}}}, nil
 }
+func (fakeBackend) Host(context.Context) (*core.Host, error) {
+	return &core.Host{Cores: 4, MemTotal: 8 << 30, Temp: 51.5}, nil
+}
+func (fakeBackend) Prune(_ context.Context, all bool) (*Job, error) {
+	return &Job{ID: "p1", App: "docker", Action: "prune", Status: JobRunning}, nil
+}
+func (fakeBackend) Webhook(_ context.Context, app string) (*WebhookInfo, error) {
+	return &WebhookInfo{Enabled: true, Branch: "main", Path: "/hooks/github/" + app}, nil
+}
+func (fakeBackend) SetWebhook(_ context.Context, app, branch string, rotate bool) (*WebhookInfo, error) {
+	return &WebhookInfo{Enabled: true, Branch: branch, Secret: "s3cret"}, nil
+}
+func (fakeBackend) DeleteWebhook(context.Context, string) error { return nil }
+func (fakeBackend) AdoptPlan(_ context.Context, name string) (*core.AdoptPlan, error) {
+	return &core.AdoptPlan{Container: name, Request: core.DeployRequest{Image: "x", Name: name}}, nil
+}
+func (fakeBackend) StartAdopt(_ context.Context, name string, req core.DeployRequest) (*Job, error) {
+	return &Job{ID: "a1", App: req.Name, Action: "adopt", Status: JobRunning}, nil
+}
+func (fakeBackend) Env(_ context.Context, app string) (map[string]string, error) {
+	if app != "web" {
+		return nil, fmt.Errorf("%w: %s", core.ErrNotFound, app)
+	}
+	return map[string]string{"DB_URL": "postgres://x"}, nil
+}
 func (fakeBackend) Containers(context.Context) ([]core.Container, error) {
 	return []core.Container{{Name: "cloudflared", State: "running"}, {Name: "web", Managed: true, App: "web"}}, nil
 }

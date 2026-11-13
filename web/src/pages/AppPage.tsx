@@ -8,6 +8,8 @@ import { ErrorBox } from "../App";
 import { StatusBadge, uptime } from "../components/StatusBadge";
 import { Logs } from "../components/Logs";
 import { Sparkline } from "../components/Sparkline";
+import { ConfigCard } from "../components/ConfigCard";
+import { WebhookCard } from "../components/WebhookCard";
 import { useToast } from "../components/Toast";
 import { statsHistory, useStats } from "../hooks/useStats";
 
@@ -57,13 +59,10 @@ export function AppPage() {
   const rows: [string, React.ReactNode][] = s
     ? [
         ["Image", <span className="mono">{s.image}</span>],
-        ["Source", s.config?.Source.Repository ?? s.config?.Source.Type ?? "–"],
-        ["Mode", s.mode],
         ...(s.domain ? [["Domain", s.domain] as [string, React.ReactNode]] : []),
-        ...(s.ports?.length ? [["Ports", <span className="mono">{s.ports.join(", ")}</span>] as [string, React.ReactNode]] : []),
+        ...(s.ports?.length ? [["Published ports", <span className="mono">{s.ports.join(", ")}</span>] as [string, React.ReactNode]] : []),
         ["Uptime", uptime(s.startedAt)],
-        ["Env keys", s.config?.Env.Keys?.join(", ") || "–"],
-        ["Path", <span className="mono">{s.path}</span>],
+        ["Container", s.container ? s.state ?? "–" : "none"],
       ]
     : [];
 
@@ -106,6 +105,8 @@ export function AppPage() {
           </dl>
         </div>
       )}
+      {s && !deleted && <ConfigCard server={server} status={s} redeployTo={redeployUrl(server, s)} />}
+      {s && !deleted && s.repo && <WebhookCard server={server} app={app} />}
       {!deleted && <Activity server={server} app={app} current={job?.id} onOpen={setJob} />}
       {!deleted && <Logs server={server} app={app} />}
     </>

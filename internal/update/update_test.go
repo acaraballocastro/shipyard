@@ -242,3 +242,21 @@ func TestReadyTimeout(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestApplyUnsetEnv(t *testing.T) {
+	dir := t.TempDir()
+	f := &fake{ready: docker.ContainerState{Running: true}}
+	r := f.runner()
+	r.Apply(ctx, dir, gitCfg(), ApplyOptions{SetEnv: map[string]string{"A": "1", "B": "2"}}, quiet)
+	cfg := gitCfg()
+	if _, err := r.Apply(ctx, dir, cfg, ApplyOptions{UnsetEnv: []string{"A"}, SetEnv: map[string]string{"C": "3"}}, quiet); err != nil {
+		t.Fatal(err)
+	}
+	vars, _ := envfile.Read(filepath.Join(dir, ".env"))
+	if _, ok := vars["A"]; ok || vars["B"] != "2" || vars["C"] != "3" {
+		t.Fatalf("vars %v", vars)
+	}
+	if strings.Join(cfg.Env.Keys, ",") != "B,C" {
+		t.Fatalf("keys recorded: %v", cfg.Env.Keys)
+	}
+}

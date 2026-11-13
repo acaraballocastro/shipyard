@@ -77,6 +77,8 @@ type Deploy struct {
 	Middlewares  []string `yaml:"middlewares,omitempty"`
 	Ports        []string `yaml:"ports,omitempty"`
 	Volumes      []string `yaml:"volumes,omitempty"`
+	// Command overrides the image's default command (one item per arg).
+	Command []string `yaml:"command,omitempty"`
 }
 
 type Env struct {
@@ -335,6 +337,7 @@ func (c *Config) ComposeSpec(dir string) compose.Spec {
 		Ports:       c.Deploy.Ports,
 		Volumes:     c.Deploy.Volumes,
 		EnvFiles:    envFiles,
+		Command:     c.Deploy.Command,
 		Traefik: compose.TraefikOptions{
 			Router:       c.Router(),
 			Domain:       c.Deploy.Domain,

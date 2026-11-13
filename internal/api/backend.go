@@ -28,7 +28,9 @@ import (
 //	1: jobs (restart, update, delete)
 //	2: deploy, stats + history, job history
 //	3: every Docker container (list, start/stop/restart, logs)
-const APILevel = 3
+//	4: service env values (GET /apps/{app}/env), unsetEnv on deploy
+//	5: host panel + prune, GitHub webhooks, container adoption, command
+const APILevel = 5
 
 // Info describes a shipyard host.
 type Info struct {
@@ -50,6 +52,21 @@ type Backend interface {
 
 	// Stats samples resource usage of every running service.
 	Stats(ctx context.Context) (map[string]core.Stats, error)
+	// Host samples the machine (CPU, memory, disks, temperature, Docker disk).
+	Host(ctx context.Context) (*core.Host, error)
+	// Prune frees Docker disk space in a background job.
+	Prune(ctx context.Context, all bool) (*Job, error)
+	// Webhook returns, SetWebhook enables and DeleteWebhook disables a
+	// service's GitHub push webhook.
+	Webhook(ctx context.Context, app string) (*WebhookInfo, error)
+	SetWebhook(ctx context.Context, app, branch string, rotate bool) (*WebhookInfo, error)
+	DeleteWebhook(ctx context.Context, app string) error
+	// AdoptPlan proposes, and StartAdopt runs, turning an existing
+	// container into a shipyard service.
+	AdoptPlan(ctx context.Context, container string) (*core.AdoptPlan, error)
+	StartAdopt(ctx context.Context, container string, req core.DeployRequest) (*Job, error)
+	// Env returns the variables of a service's .env (values included).
+	Env(ctx context.Context, app string) (map[string]string, error)
 	// Containers lists every Docker container on the server.
 	Containers(ctx context.Context) ([]core.Container, error)
 	// ContainerAction starts, stops or restarts any container.
@@ -78,10 +95,51 @@ type Local struct {
 	Svc     *core.Service
 	Jobs    *Jobs
 	History *StatsHistory // nil: no history kept
+	Hooks   *Hooks        // nil: webhooks unavailable (shipyard ui)
 }
+
+// errNoHooks is returned where webhooks are not served (shipyard ui).
+var errNoHooks = fmt.Errorf("%w: webhooks are served by shipyard serve on the server", ErrInvalidRequest)
 
 func (l Local) StartAction(_ context.Context, app, action string) (*Job, error) {
 	return l.Jobs.Start(app, action)
+}
+
+func (l Local) Host(ctx context.Context) (*core.Host, error) { return l.Svc.HostInfo(ctx), nil }
+
+func (l Local) Prune(_ context.Context, all bool) (*Job, error) { return l.Jobs.StartPrune(all) }
+
+func (l Local) Webhook(_ context.Context, app string) (*WebhookInfo, error) {
+	if l.Hooks == nil {
+		return nil, errNoHooks
+	}
+	return l.Hooks.Get(app)
+}
+
+func (l Local) SetWebhook(_ context.Context, app, branch string, rotate bool) (*WebhookInfo, error) {
+	if l.Hooks == nil {
+		return nil, errNoHooks
+	}
+	return l.Hooks.Set(app, branch, rotate)
+}
+
+func (l Local) DeleteWebhook(_ context.Context, app string) error {
+	if l.Hooks == nil {
+		return errNoHooks
+	}
+	return l.Hooks.Delete(app)
+}
+
+func (l Local) AdoptPlan(ctx context.Context, container string) (*core.AdoptPlan, error) {
+	return l.Svc.PlanAdoption(ctx, container)
+}
+
+func (l Local) StartAdopt(_ context.Context, container string, req core.DeployRequest) (*Job, error) {
+	return l.Jobs.StartAdopt(container, req)
+}
+
+func (l Local) Env(_ context.Context, app string) (map[string]string, error) {
+	return l.Svc.Env(app)
 }
 
 func (l Local) Containers(ctx context.Context) ([]core.Container, error) {
@@ -264,7 +322,7 @@ func (r Remote) sendBody(ctx context.Context, client *http.Client, method, path 
 			return nil, fmt.Errorf("%w: %s", ErrUnknownAction, e.Error)
 		case resp.StatusCode == http.StatusBadRequest && strings.Contains(e.Error, ErrInvalidRequest.Error()):
 			return nil, fmt.Errorf("%w: %s", ErrInvalidRequest, strings.TrimPrefix(e.Error, ErrInvalidRequest.Error()+": "))
-		case resp.StatusCode == http.StatusNotFound && (method != http.MethodGet || path == "/stats" || path == "/stats/history" || path == "/jobs" || path == "/containers"):
+		case resp.StatusCode == http.StatusNotFound && (method != http.MethodGet || path == "/stats" || path == "/stats/history" || path == "/jobs" || path == "/containers" || path == "/host"):
 			// An older shipyard serve without this endpoint.
 			return nil, &RemoteError{Status: resp.StatusCode, Message: "the server's shipyard is too old for this action; update it"}
 		}
@@ -304,6 +362,67 @@ func (r Remote) Logs(ctx context.Context, app string, opts core.LogsOptions, w i
 
 func (r Remote) ContainerLogs(ctx context.Context, name string, opts core.LogsOptions, w io.Writer) error {
 	return r.relayLogs(ctx, "/containers/"+url.PathEscape(name)+"/logs", opts, w)
+}
+
+func (r Remote) Host(ctx context.Context) (*core.Host, error) {
+	var h core.Host
+	return &h, r.getJSON(ctx, "/host", &h)
+}
+
+// postJSON sends a JSON body and decodes a JSON answer into out (if any).
+func (r Remote) sendJSON(ctx context.Context, method, path string, in, out any) error {
+	var body []byte
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return err
+		}
+		body = b
+	}
+	resp, err := r.sendBody(ctx, r.client(), method, path, nil, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if out == nil || resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func (r Remote) Prune(ctx context.Context, all bool) (*Job, error) {
+	var j Job
+	return &j, r.sendJSON(ctx, http.MethodPost, "/prune", map[string]bool{"all": all}, &j)
+}
+
+func (r Remote) Webhook(ctx context.Context, app string) (*WebhookInfo, error) {
+	var w WebhookInfo
+	return &w, r.getJSON(ctx, "/apps/"+url.PathEscape(app)+"/webhook", &w)
+}
+
+func (r Remote) SetWebhook(ctx context.Context, app, branch string, rotate bool) (*WebhookInfo, error) {
+	var w WebhookInfo
+	return &w, r.sendJSON(ctx, http.MethodPut, "/apps/"+url.PathEscape(app)+"/webhook",
+		map[string]any{"branch": branch, "rotate": rotate}, &w)
+}
+
+func (r Remote) DeleteWebhook(ctx context.Context, app string) error {
+	return r.sendJSON(ctx, http.MethodDelete, "/apps/"+url.PathEscape(app)+"/webhook", nil, nil)
+}
+
+func (r Remote) AdoptPlan(ctx context.Context, container string) (*core.AdoptPlan, error) {
+	var p core.AdoptPlan
+	return &p, r.getJSON(ctx, "/containers/"+url.PathEscape(container)+"/adopt", &p)
+}
+
+func (r Remote) StartAdopt(ctx context.Context, container string, req core.DeployRequest) (*Job, error) {
+	var j Job
+	return &j, r.sendJSON(ctx, http.MethodPost, "/containers/"+url.PathEscape(container)+"/adopt", req, &j)
+}
+
+func (r Remote) Env(ctx context.Context, app string) (map[string]string, error) {
+	out := map[string]string{}
+	return out, r.getJSON(ctx, "/apps/"+url.PathEscape(app)+"/env", &out)
 }
 
 func (r Remote) Containers(ctx context.Context) ([]core.Container, error) {

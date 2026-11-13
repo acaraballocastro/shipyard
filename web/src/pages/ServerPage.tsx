@@ -9,6 +9,7 @@ import { statsHistory, useStats } from "../hooks/useStats";
 import { useShortcuts } from "../hooks/useShortcuts";
 import { OutdatedBanner } from "../components/OutdatedBanner";
 import { OtherContainers } from "../components/OtherContainers";
+import { HostPanel } from "../components/HostPanel";
 import { memAvailable } from "../api";
 
 type Filter = "all" | "running" | "issues";
@@ -80,6 +81,7 @@ export function ServerPage() {
 
       {info.error && <ErrorBox error={info.error} />}
       <OutdatedBanner server={server} />
+      <HostPanel server={server} />
       {apps.error && <ErrorBox error={apps.error} />}
 
       {!!apps.data?.length && (

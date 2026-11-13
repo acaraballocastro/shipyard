@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -11,6 +12,14 @@ import (
 type Compose struct {
 	Services map[string]Service `yaml:"services"`
 	Networks map[string]Network `yaml:"networks,omitempty"`
+	Volumes  map[string]Volume  `yaml:"volumes,omitempty"`
+}
+
+// Volume is a top-level named volume. Name pins the real Docker volume
+// name, so compose neither prefixes it with the project nor creates a new
+// empty one when it already exists (data survives redeploys and adoption).
+type Volume struct {
+	Name string `yaml:"name"`
 }
 
 type Network struct {
@@ -27,6 +36,7 @@ type Service struct {
 	Networks      []string          `yaml:"networks,omitempty"`
 	Labels        []string          `yaml:"labels,omitempty"`
 	Environment   map[string]string `yaml:"environment,omitempty"`
+	Command       []string          `yaml:"command,omitempty"`
 	Healthcheck   *Healthcheck      `yaml:"healthcheck,omitempty"`
 }
 
@@ -48,6 +58,7 @@ type Spec struct {
 	Ports       []string
 	Volumes     []string
 	EnvFiles    []string
+	Command     []string
 	Traefik     TraefikOptions
 	Healthcheck *Healthcheck
 }
@@ -61,9 +72,18 @@ func Build(s Spec) (Compose, error) {
 		EnvFile:       s.EnvFiles,
 		Volumes:       s.Volumes,
 		Healthcheck:   s.Healthcheck,
+		Command:       s.Command,
 	}
 
 	c := Compose{Services: map[string]Service{}}
+	for _, v := range s.Volumes {
+		if name, ok := NamedVolume(v); ok {
+			if c.Volumes == nil {
+				c.Volumes = map[string]Volume{}
+			}
+			c.Volumes[name] = Volume{Name: name}
+		}
+	}
 
 	switch s.Mode {
 	case "traefik":
@@ -90,6 +110,19 @@ func Build(s Spec) (Compose, error) {
 
 	c.Services[s.ServiceName] = service
 	return c, nil
+}
+
+// NamedVolume returns the volume name of a "source:target[:mode]" mount
+// whose source is a Docker volume rather than a host path.
+func NamedVolume(mount string) (string, bool) {
+	src, _, ok := strings.Cut(mount, ":")
+	if !ok || src == "" {
+		return "", false
+	}
+	if strings.HasPrefix(src, "/") || strings.HasPrefix(src, ".") || strings.HasPrefix(src, "~") || strings.HasPrefix(src, "$") {
+		return "", false
+	}
+	return src, true
 }
 
 // Marshal renders a spec to YAML.

@@ -81,6 +81,11 @@ type Options struct {
 	// AllowedEmails restricts AccessLogin to these users (empty: anyone
 	// your Access policy lets through).
 	AllowedEmails []string
+
+	// Hooks serves POST /hooks/github/{app} (shipyard serve only). The
+	// route is exempt from the token and from Cloudflare Access: GitHub
+	// authenticates with the webhook signature.
+	Hooks http.Handler
 }
 
 type ctxKey int
@@ -132,6 +137,14 @@ func Handler(o Options) http.Handler {
 		h.streamLogs(w, r, func(ctx context.Context, o core.LogsOptions, out io.Writer) error {
 			return b.Logs(ctx, r.PathValue("app"), o, out)
 		})
+	}))
+	mux.HandleFunc("GET /api/v1/servers/{server}/apps/{app}/env", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		env, err := b.Env(r.Context(), r.PathValue("app"))
+		if env == nil && err == nil {
+			env = map[string]string{}
+		}
+		w.Header().Set("Cache-Control", "no-store") // secrets
+		respond(w, env, err)
 	}))
 	mux.HandleFunc("GET /api/v1/servers/{server}/containers", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
 		cs, err := b.Containers(r.Context())
@@ -224,6 +237,70 @@ func Handler(o Options) http.Handler {
 	}))
 	mux.HandleFunc("GET /api/v1/servers/{server}/jobs/{id}/events", h.backend(h.jobEvents))
 
+	mux.HandleFunc("GET /api/v1/servers/{server}/host", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		host, err := b.Host(r.Context())
+		respond(w, host, err)
+	}))
+	mux.HandleFunc("POST /api/v1/servers/{server}/prune", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		var body struct {
+			All bool `json:"all"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body)
+		job, err := b.Prune(r.Context(), body.All)
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job)
+	}))
+	mux.HandleFunc("GET /api/v1/servers/{server}/apps/{app}/webhook", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		wh, err := b.Webhook(r.Context(), r.PathValue("app"))
+		respond(w, wh, err)
+	}))
+	mux.HandleFunc("PUT /api/v1/servers/{server}/apps/{app}/webhook", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		var body struct {
+			Branch string `json:"branch"`
+			Rotate bool   `json:"rotate"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid body")
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store") // may carry the secret
+		wh, err := b.SetWebhook(r.Context(), r.PathValue("app"), body.Branch, body.Rotate)
+		respond(w, wh, err)
+	}))
+	mux.HandleFunc("DELETE /api/v1/servers/{server}/apps/{app}/webhook", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		if err := b.DeleteWebhook(r.Context(), r.PathValue("app")); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	mux.HandleFunc("GET /api/v1/servers/{server}/containers/{name}/adopt", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		w.Header().Set("Cache-Control", "no-store") // env values
+		plan, err := b.AdoptPlan(r.Context(), r.PathValue("name"))
+		respond(w, plan, err)
+	}))
+	mux.HandleFunc("POST /api/v1/servers/{server}/containers/{name}/adopt", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		var req core.DeployRequest
+		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid adopt request: "+err.Error())
+			return
+		}
+		job, err := b.StartAdopt(r.Context(), r.PathValue("name"), req)
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job)
+	}))
+	if o.Hooks != nil {
+		mux.Handle("POST /hooks/github/{app}", o.Hooks)
+	}
+
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})
@@ -246,7 +323,7 @@ func (h *handler) guard(next http.Handler) http.Handler {
 			http.Error(w, "forbidden host", http.StatusForbidden)
 			return
 		}
-		if r.Header.Get(cfConnectingIP) != "" && h.o.Access != nil {
+		if r.Header.Get(cfConnectingIP) != "" && h.o.Access != nil && !strings.HasPrefix(r.URL.Path, "/hooks/") {
 			id, err := h.o.Access.FromRequest(r)
 			if err != nil {
 				writeError(w, http.StatusForbidden, "cloudflare access: "+err.Error())

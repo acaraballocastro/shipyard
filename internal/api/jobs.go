@@ -167,6 +167,24 @@ func (j *Jobs) StartDeploy(req core.DeployRequest) (*Job, error) {
 	})
 }
 
+// StartPrune cleans Docker disk space in the background.
+func (j *Jobs) StartPrune(all bool) (*Job, error) {
+	return j.Launch("docker", "prune", func(ctx context.Context, p events.Progress) error {
+		return j.Svc.Prune(ctx, all, p)
+	})
+}
+
+// StartAdopt turns an existing container into a shipyard service.
+func (j *Jobs) StartAdopt(container string, req core.DeployRequest) (*Job, error) {
+	if req.Image == "" {
+		return nil, fmt.Errorf("%w: adoption needs the container image", ErrInvalidRequest)
+	}
+	name := core.DeployName(req)
+	return j.Launch(name, "adopt", func(ctx context.Context, p events.Progress) error {
+		return j.Svc.Adopt(ctx, container, req, p)
+	})
+}
+
 // Launch registers a job under key (one running job per key) and runs fn
 // in the background. Start and StartDeploy use it with the service name.
 func (j *Jobs) Launch(app, action string, fn func(context.Context, events.Progress) error) (*Job, error) {

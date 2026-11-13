@@ -41,10 +41,12 @@ as a systemd service with "shipyard serve install" (done by server add).`,
 		if err != nil {
 			ui.Fatal("token: %s", err)
 		}
+		reg := newLocalRegistry()
 		opts := api.Options{
-			Registry: newLocalRegistry(),
+			Registry: reg,
 			Token:    token,
 			UI:       web.FS(),
+			Hooks:    reg.hooks,
 		}
 		if err := applyServeConfig(&opts); err != nil {
 			ui.Fatal("%s", err)
@@ -171,11 +173,18 @@ type localRegistry struct {
 	svc     *core.Service
 	jobs    *api.Jobs
 	history *api.StatsHistory
+	hooks   *api.Hooks
 }
 
 func newLocalRegistry() localRegistry {
 	svc := core.New()
-	return localRegistry{svc: svc, jobs: openJobs(svc, "jobs", ""), history: api.NewStatsHistory()}
+	jobs := openJobs(svc, "jobs", "")
+	home, _ := os.UserHomeDir()
+	hooks := &api.Hooks{Path: filepath.Join(home, ".shipyard", "webhooks.yaml"), Jobs: jobs}
+	if c, err := loadServeConfig(); err == nil && c.Cloudflare != nil && c.Cloudflare.Hostname != "" {
+		hooks.PublicURL = "https://" + c.Cloudflare.Hostname
+	}
+	return localRegistry{svc: svc, jobs: jobs, history: api.NewStatsHistory(), hooks: hooks}
 }
 
 // openJobs keeps job history in ~/.shipyard/<sub>, falling back to memory
@@ -206,7 +215,7 @@ func (l localRegistry) Backend(name string) (api.Backend, bool) {
 	if name != api.LocalServer {
 		return nil, false
 	}
-	return api.Local{Svc: l.svc, Jobs: l.jobs, History: l.history}, true
+	return api.Local{Svc: l.svc, Jobs: l.jobs, History: l.history, Hooks: l.hooks}, true
 }
 
 func init() {

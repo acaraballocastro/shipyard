@@ -47,6 +47,11 @@ export function ContainerPage() {
         </div>
         {c && (
           <div className="actions">
+            {!c.managed && (
+              <Link className="button secondary" to={`/servers/${server}/deploy?adopt=${encodeURIComponent(name)}`} title="Manage it with shipyard from now on">
+                Adopt into shipyard…
+              </Link>
+            )}
             {running ? (
               <>
                 <button className="secondary" disabled={act.isPending} onClick={() => act.mutate("restart")}>

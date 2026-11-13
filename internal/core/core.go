@@ -20,6 +20,7 @@ import (
 
 	"shipyard/internal/deployment"
 	"shipyard/internal/docker"
+	"shipyard/internal/envfile"
 	"shipyard/internal/events"
 	"shipyard/internal/state"
 	"shipyard/internal/system"
@@ -238,6 +239,24 @@ func (s *Service) Delete(ctx context.Context, name string, p events.Progress) er
 	}
 	p.Ok("%s removed", name)
 	return nil
+}
+
+// Env returns the variables of a service's .env file (the values set with
+// --env or from the UI). Variables from env files are not included.
+func (s *Service) Env(name string) (map[string]string, error) {
+	app, err := lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(app.Path, deployment.LocalEnvFileName)
+	vars, err := envfile.Read(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	return vars, nil
 }
 
 // LogsOptions controls Logs.
