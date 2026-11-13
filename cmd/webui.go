@@ -32,8 +32,10 @@ talks to localhost.`,
 			ui.Fatal("%s", err)
 		}
 		token := api.NewToken() // per run: only this browser session gets in
+		reg := newGatewayRegistry()
+		defer reg.routes.closeAll() // stop SSH tunnels
 		h := api.Handler(api.Options{
-			Registry:     gatewayRegistry{svc: core.New()},
+			Registry:     reg,
 			Token:        token,
 			UI:           web.FS(),
 			LoopbackOnly: true,
@@ -54,7 +56,21 @@ talks to localhost.`,
 
 // gatewayRegistry is this machine plus the servers with an API URL.
 // The config is read on every call, so servers added meanwhile appear.
-type gatewayRegistry struct{ svc *core.Service }
+type gatewayRegistry struct {
+	svc     *core.Service
+	jobs    *api.Jobs
+	history *api.StatsHistory
+	routes  *routeCache
+}
+
+// gatewayJobPrefix marks jobs run by `shipyard ui` itself (local actions
+// and server upgrades), as opposed to jobs relayed from a server.
+const gatewayJobPrefix = "ui-"
+
+func newGatewayRegistry() gatewayRegistry {
+	svc := core.New()
+	return gatewayRegistry{svc: svc, jobs: openJobs(svc, "ui-jobs", gatewayJobPrefix), history: api.NewStatsHistory(), routes: newRouteCache()}
+}
 
 func (g gatewayRegistry) Servers() []api.ServerInfo {
 	cfg, _ := config.LoadOrEmpty()
@@ -64,21 +80,34 @@ func (g gatewayRegistry) Servers() []api.ServerInfo {
 		if s.URL == "" {
 			continue
 		}
-		out = append(out, api.ServerInfo{Name: n, Kind: "remote", URL: s.URL, Default: cfg.DefaultServer == n})
+		out = append(out, api.ServerInfo{Name: n, Kind: "remote", URL: s.URL, Default: cfg.DefaultServer == n,
+			Upgradable: s.Host != "", Routes: g.routeStatus(n)})
 	}
 	return out
 }
 
 func (g gatewayRegistry) Backend(name string) (api.Backend, bool) {
 	if name == api.LocalServer {
-		return api.Local{Svc: g.svc}, true
+		return api.Local{Svc: g.svc, Jobs: g.jobs, History: g.history}, true
 	}
 	cfg, _ := config.LoadOrEmpty()
 	s, ok := cfg.Servers[name]
 	if !ok || s.URL == "" {
 		return nil, false
 	}
-	return api.Remote{URL: s.URL, Token: s.Token}, true
+	r := api.Remote{Token: s.Token, Routes: g.routes.get(name, s)}
+	if s.Host == "" {
+		return r, true
+	}
+	return gatewayRemote{Remote: r, name: name, host: s.Host, jobs: g.jobs}, true
+}
+
+// routeStatus reports the routes of a server once it has been contacted.
+func (g gatewayRegistry) routeStatus(name string) []api.RouteStatus {
+	if rs := g.routes.peek(name); rs != nil {
+		return rs.Status()
+	}
+	return nil
 }
 
 func openBrowser(url string) {

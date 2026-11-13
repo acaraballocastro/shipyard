@@ -84,11 +84,10 @@ func (s *Service) Deploy(ctx context.Context, req DeployRequest, p events.Progre
 	}
 	isImage := req.Repo == ""
 
-	var name, image string
+	name := DeployName(req)
+	image := req.Image
 	if isImage {
 		p.Info("mode image: %s", req.Image)
-		name = docker.AdvancedNormalizeName(req.Image)
-		image = req.Image
 	} else {
 		if err := deployment.ValidateRepo(req.Repo); err != nil {
 			return nil, err
@@ -100,16 +99,13 @@ func (s *Service) Deploy(ctx context.Context, req DeployRequest, p events.Progre
 		if cfg.GitHubUser == "" {
 			return nil, errors.New("github_user is not set (run shipyard setup)")
 		}
+		// The built image is named after Image when given, else the repo.
 		imgName := req.Image
 		if imgName == "" {
 			imgName = git.ExtractRepoName(req.Repo)
 		}
-		name = docker.NormalizeName(imgName)
-		image = fmt.Sprintf("ghcr.io/%s/%s", strings.ToLower(cfg.GitHubUser), name)
+		image = fmt.Sprintf("ghcr.io/%s/%s", strings.ToLower(cfg.GitHubUser), docker.NormalizeName(imgName))
 		p.Info("mode repo: %s", req.Repo)
-	}
-	if req.Name != "" {
-		name = req.Name
 	}
 	if !deployment.ValidName(name) {
 		return nil, fmt.Errorf("invalid service name %q (choose one explicitly)", name)
@@ -189,6 +185,21 @@ func (s *Service) Deploy(ctx context.Context, req DeployRequest, p events.Progre
 
 	p.Ok("%s deployed", name)
 	return &DeployResult{Name: name, Image: cfg.Image, Path: dir, Health: cs.Health, Existing: existing}, nil
+}
+
+// DeployName is the service name a request deploys to: Name, or one
+// derived from Repo (or Image, when it names the built image) or Image.
+func DeployName(req DeployRequest) string {
+	switch {
+	case req.Name != "":
+		return req.Name
+	case req.Repo == "":
+		return docker.AdvancedNormalizeName(req.Image)
+	case req.Image != "":
+		return docker.NormalizeName(req.Image)
+	default:
+		return docker.NormalizeName(git.ExtractRepoName(req.Repo))
+	}
 }
 
 // loadExisting returns the saved configuration of a service or a fresh one.

@@ -4,6 +4,7 @@ package remote
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -93,4 +94,13 @@ func Quote(s string) string {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// Stream executes args on host without a terminal (so it never prompts),
+// writing stdout and stderr to w, until done or ctx is cancelled.
+func Stream(ctx context.Context, host string, w io.Writer, args ...string) error {
+	sa := append([]string{"-o", "BatchMode=yes"}, sshArgs(host, false, Command(args...))...)
+	c := exec.CommandContext(ctx, "ssh", sa...)
+	c.Stdout, c.Stderr = w, w
+	return c.Run()
 }

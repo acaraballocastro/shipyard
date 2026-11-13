@@ -9,19 +9,21 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: test
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-            output: shipyard-linux-amd64
-
-          - goos: linux
-            goarch: arm64
-            output: shipyard-linux-arm64
+          - { goos: linux, goarch: amd64, output: shipyard-linux-amd64 }
+          - { goos: linux, goarch: arm64, output: shipyard-linux-arm64 }
+          - { goos: linux, goarch: arm, goarm: "7", output: shipyard-linux-armv7 }
+          - { goos: darwin, goarch: arm64, output: shipyard-darwin-arm64 }
+          - { goos: darwin, goarch: amd64, output: shipyard-darwin-amd64 }
 
     steps:
       - name: Checkout
@@ -43,12 +45,18 @@ jobs:
         run: cd web && npm ci --no-audit --no-fund && npm run build
 
       - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: "0"
         run: |
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
           go build -ldflags "-s -w -X shipyard/internal/version.Version=${{ github.ref_name }}" -o ${{ matrix.output }}
+          sha256sum ${{ matrix.output }} > ${{ matrix.output }}.sha256
 
       - name: Upload Release Binary
         uses: softprops/action-gh-release@v2
         with:
           files: |
             ${{ matrix.output }}
+            ${{ matrix.output }}.sha256

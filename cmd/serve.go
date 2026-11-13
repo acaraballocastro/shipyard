@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -40,11 +41,15 @@ as a systemd service with "shipyard serve install" (done by server add).`,
 		if err != nil {
 			ui.Fatal("token: %s", err)
 		}
-		h := api.Handler(api.Options{
-			Registry: localRegistry{svc: core.New()},
+		opts := api.Options{
+			Registry: newLocalRegistry(),
 			Token:    token,
 			UI:       web.FS(),
-		})
+		}
+		if err := applyServeConfig(&opts); err != nil {
+			ui.Fatal("%s", err)
+		}
+		h := api.Handler(opts)
 		ui.Info("shipyard serve listening on %s", serveListen)
 		if err := listen(cmd.Context(), serveListen, h); err != nil {
 			ui.Fatal("%s", err)
@@ -159,7 +164,36 @@ func serveOn(ctx context.Context, ln net.Listener, h http.Handler) error {
 }
 
 // localRegistry exposes only this machine.
-type localRegistry struct{ svc *core.Service }
+type localRegistry struct {
+	svc     *core.Service
+	jobs    *api.Jobs
+	history *api.StatsHistory
+}
+
+func newLocalRegistry() localRegistry {
+	svc := core.New()
+	return localRegistry{svc: svc, jobs: openJobs(svc, "jobs", ""), history: api.NewStatsHistory()}
+}
+
+// openJobs keeps job history in ~/.shipyard/<sub>, falling back to memory
+// (with a warning) when the directory is unusable.
+func openJobs(svc *core.Service, sub, prefix string) *api.Jobs {
+	home, err := os.UserHomeDir()
+	if err == nil {
+		var j *api.Jobs
+		j, err = api.OpenJobs(svc, filepath.Join(home, ".shipyard", sub), prefix)
+		if j != nil {
+			if err != nil {
+				ui.Warn("job history: %s", err)
+			}
+			return j
+		}
+	}
+	ui.Warn("job history will not survive a restart: %s", err)
+	j := api.NewJobs(svc)
+	j.Prefix = prefix
+	return j
+}
 
 func (l localRegistry) Servers() []api.ServerInfo {
 	return []api.ServerInfo{{Name: api.LocalServer, Kind: "local", Default: true}}
@@ -169,7 +203,7 @@ func (l localRegistry) Backend(name string) (api.Backend, bool) {
 	if name != api.LocalServer {
 		return nil, false
 	}
-	return api.Local{Svc: l.svc}, true
+	return api.Local{Svc: l.svc, Jobs: l.jobs, History: l.history}, true
 }
 
 func init() {

@@ -5,13 +5,15 @@ import (
 
 	"shipyard/internal/prompt"
 	"shipyard/internal/ui"
+	"shipyard/internal/version"
 
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "shipyard",
-	Short: "Lightweight deployment CLI for Docker and homelab servers",
+	Use:     "shipyard",
+	Short:   "Lightweight deployment CLI for Docker and homelab servers",
+	Version: version.Version,
 }
 
 func Execute() {

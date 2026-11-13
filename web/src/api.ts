@@ -5,13 +5,27 @@ export interface ServerInfo {
   kind: "local" | "remote";
   url?: string;
   default: boolean;
+  upgradable?: boolean;
+  routes?: RouteStatus[]; // remote servers, once contacted
 }
+
+// One way to reach a server (internal/api.RouteStatus), in preference order.
+export interface RouteStatus {
+  name: string;
+  active: boolean;
+  error?: string;
+}
+
+// The API level this UI needs (internal/api.APILevel). The UI ships inside
+// the same binary, so a server reporting less runs an older shipyard.
+export const REQUIRED_API = 2;
 
 export interface HostInfo {
   hostname: string;
   version: string;
   os: string;
   arch: string;
+  api?: number; // absent on servers older than level 2
 }
 
 export interface App {
@@ -46,6 +60,71 @@ export interface DeploymentConfig {
   Healthcheck: { Enabled: boolean; Command?: string };
 }
 
+export type JobStatus = "running" | "succeeded" | "failed" | "canceled";
+export type Action = "restart" | "update" | "delete";
+
+export interface Job {
+  id: string;
+  app: string;
+  action: Action | "deploy" | "upgrade";
+  status: JobStatus;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
+// A progress event from the server (internal/events).
+export interface ProgressEvent {
+  time: string;
+  level: "step" | "info" | "warn" | "detail" | "ok";
+  stage?: string;
+  key?: string;
+  message: string;
+}
+
+// A resource sample of one container (core.Stats).
+export interface Stats {
+  cpu: number;
+  memPerc: number;
+  memUsage: string;
+  netIO: string;
+  blockIO: string;
+  pids: number;
+}
+
+export interface Sample extends Stats {
+  t: number; // unix ms
+}
+
+// core.DeployRequest. Omitted fields keep the saved value of an existing
+// service, or the default for a new one.
+export interface DeployRequest {
+  repo?: string;
+  image?: string;
+  name?: string;
+  mode?: "local" | "traefik";
+  domain?: string;
+  network?: string;
+  createNetwork?: boolean;
+  internalPort?: string;
+  ports?: string[];
+  volumes?: string[];
+  env?: Record<string, string>;
+  buildArgs?: string[];
+  platform?: string;
+  entrypoint?: string;
+  tls?: boolean;
+  certResolver?: string;
+  healthcheckCmd?: string;
+  noHealthcheck?: boolean;
+}
+
+export interface Session {
+  authenticated: boolean;
+  access?: boolean; // reached through Cloudflare Access
+  email?: string; // Access identity, when signed in that way
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -56,7 +135,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/v1${path}`, {
     credentials: "same-origin",
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    // X-Shipyard: required by the server on state-changing requests (CSRF).
+    headers: { "Content-Type": "application/json", "X-Shipyard": "1", ...init?.headers },
   });
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => ({}));
@@ -67,7 +147,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const enc = encodeURIComponent;
 
 export const api = {
-  session: () => request<{ authenticated: boolean }>("/session"),
+  session: () => request<Session>("/session"),
   login: (token: string) =>
     request<{ authenticated: boolean }>("/session", { method: "POST", body: JSON.stringify({ token }) }),
   logout: () => request<void>("/session", { method: "DELETE" }),
@@ -76,6 +156,20 @@ export const api = {
   info: (server: string) => request<HostInfo>(`/servers/${enc(server)}/info`),
   apps: (server: string) => request<App[]>(`/servers/${enc(server)}/apps`),
   status: (server: string, app: string) => request<AppStatus>(`/servers/${enc(server)}/apps/${enc(app)}`),
+  startAction: (server: string, app: string, action: Action) =>
+    request<Job>(`/servers/${enc(server)}/apps/${enc(app)}/actions/${action}`, { method: "POST" }),
+  stats: (server: string) => request<Record<string, Stats>>(`/servers/${enc(server)}/stats`),
+  statsHistory: (server: string) => request<Record<string, Sample[]>>(`/servers/${enc(server)}/stats/history`),
+  upgrade: (server: string) => request<Job>(`/servers/${enc(server)}/upgrade`, { method: "POST" }),
+  deploy: (server: string, req: DeployRequest) =>
+    request<Job>(`/servers/${enc(server)}/deploy`, { method: "POST", body: JSON.stringify(req) }),
+  jobs: (server: string, app?: string) =>
+    request<Job[]>(`/servers/${enc(server)}/jobs${app ? `?app=${enc(app)}` : ""}`),
+  job: (server: string, id: string) => request<Job>(`/servers/${enc(server)}/jobs/${enc(id)}`),
+  cancelJob: (server: string, id: string) =>
+    request<void>(`/servers/${enc(server)}/jobs/${enc(id)}/cancel`, { method: "POST" }),
+  jobEventsUrl: (server: string, id: string) => `/api/v1/servers/${enc(server)}/jobs/${enc(id)}/events`,
+
   logsUrl: (server: string, app: string, tail: number) =>
     `/api/v1/servers/${enc(server)}/apps/${enc(app)}/logs?follow=1&tail=${tail}`,
 };

@@ -34,12 +34,14 @@ It provides a simple workflow for running services locally or behind a reverse p
 curl -sSL https://raw.githubusercontent.com/acaraballocastro/shipyard/main/install.sh | bash
 ```
 
+Works on Linux (`amd64`, `arm64`, `armv7`) and macOS (Apple Silicon and Intel). The script verifies the release checksum and that the binary runs before replacing an existing install. Pin a version with `SHIPYARD_VERSION=v0.4.0`.
+
 ### Manual installation
 
 #### Build from source
 
 ```bash
-go build -o shipyard
+make build   # builds the web UI (needs Node 22) and embeds it in the binary
 ```
 
 #### Install binary globally
@@ -88,10 +90,14 @@ Flags still work as before and skip the questions. Prompts are disabled when the
 shipyard ui            # on your Mac: opens the dashboard in the browser
 ```
 
-* Shows this machine and every server with its API enabled: services, status, resources and live logs.
+* Shows this machine and every server with its API enabled: services, status, live CPU/memory charts and logs.
+* **Deploy from the browser**: an image or a GitHub repository, with ports or a Traefik domain, env vars, volumes and a healthcheck. Progress and build output stream live. **Redeploy…** on a service changes only the fields you fill in.
+* Restart, update and delete run in the background; each service has an **Activity** timeline whose entries replay their full output. History survives restarts (`~/.shipyard/jobs/`).
+* Search and filter services; keyboard shortcuts (`/` search, `n` new deploy, `?` help); light, dark or system theme.
+* When a server runs an older shipyard, the UI says so and offers **Update** (over SSH; needs passwordless `sudo` on the server, otherwise run `shipyard server upgrade <name>`).
 * `shipyard server add` offers to enable the API on the server: it installs `shipyard serve` as a systemd service on port 7878 and stores its URL and token in your `~/.shipyard.yaml`.
 * The browser only talks to `shipyard ui` on `127.0.0.1` (one-time token, HttpOnly cookie); server tokens never reach it.
-* `shipyard serve` can also be opened directly (`http://<server>:7878`, sign in with `shipyard serve token`). Over a LAN this is plain HTTP for now; publishing it through Traefik with TLS is planned.
+* `shipyard serve` can also be opened directly (`http://<server>:7878`, sign in with `shipyard serve token`). On the LAN this is plain HTTP; to reach it from outside, publish it through Cloudflare Tunnel + Access (see below) rather than opening the port.
 
 Development: `make web-dev` runs the frontend with hot reload against `shipyard ui --port 7878`; `make build` builds the frontend and embeds it in the binary.
 
@@ -110,7 +116,50 @@ shipyard deploy --server pi --repo user/app      # or explicitly
 shipyard logs                                    # pick a service on the default server
 shipyard list --server local                     # force this machine
 shipyard server use local                        # change the default
+shipyard server upgrade pi                       # install the latest shipyard on it and restart its API
 ```
+
+#### Publishing the web UI through Cloudflare Tunnel + Access
+
+With a `cloudflared` tunnel already running on the server:
+
+1. **Access application** (Zero Trust → Access → Applications → Self-hosted): hostname `shipyard.example.com`, a policy that allows you (e.g. your email), and a second policy with action **Service Auth** for a service token (Access → Service Auth → create one; keep the client ID and secret).
+2. **Tunnel**: add the public hostname `shipyard.example.com` → `http://localhost:7878`.
+3. **On the server**, copy the team domain and the application's AUD tag and run:
+   ```bash
+   shipyard serve cloudflare --team <team> --aud <AUD tag> --hostname shipyard.example.com
+   ```
+   From then on every request arriving through Cloudflare must carry a valid Access token (signature, audience, expiry are checked), so the hostname is never open even if the Access policy is wrong. LAN and SSH-tunnel requests are unaffected and still need the shipyard token.
+4. **On your Mac**, make it the preferred route:
+   ```bash
+   shipyard server route add pi cloudflare https://shipyard.example.com --first \
+       --cf-client-id <id>.access --cf-client-secret <secret>
+   ```
+
+By default you need both Access and the shipyard token. To sign in from the browser (e.g. your phone) with just your Access login, add `--login --allow you@example.com`. Sign out then ends the Access session too. Settings live in `~/.shipyard/serve.yaml` on the server; `shipyard serve cloudflare --disable` removes them.
+
+#### Reaching a server from anywhere (routes and failover)
+
+`shipyard ui` can reach a server's API through several **routes**, tried in order. If one is unreachable it moves to the next within seconds, and every minute it tries the preferred ones again. The UI shows which route is in use (`via ssh` in amber means a fallback is active; hover it to see why).
+
+By default a server has two routes: its LAN URL, then an **SSH tunnel** over your normal `ssh` access, so the UI keeps working away from home with no extra setup, as long as SSH reaches the server.
+
+Add more routes, most preferred first:
+
+```bash
+# Public URL through Cloudflare Tunnel, protected by Cloudflare Access (service token)
+shipyard server route add pi cloudflare https://shipyard.example.com --first \
+    --cf-client-id <id>.access --cf-client-secret <secret>
+
+# A path that does not depend on Cloudflare, e.g. Tailscale
+shipyard server route add pi tailscale http://pi.<tailnet>.ts.net:7878
+
+shipyard server route list pi      # tests every route from where you are
+shipyard server route remove pi tailscale
+```
+
+Why more than one: in some countries ISPs block shared Cloudflare IP ranges for hours (Spain does it during LaLiga matches), which takes down perfectly legitimate sites behind Cloudflare. With a second route that does not go through Cloudflare (Tailscale, WireGuard, or SSH reachable without Cloudflare) the UI fails over automatically and comes back when the block ends. Keep in mind that if your SSH access also goes through Cloudflare (`cloudflared access ssh`), the SSH tunnel and the **Update** button are blocked too.
+
 
 * `--server` works with `deploy`, `update`, `logs`, `restart`, `status`, `shell`, `delete`, `list`, `cleanup` and `doctor`. `watch` always runs locally: start it on the server itself.
 * Local `--env-file` files are uploaded to `~/.shipyard/envfiles/` on the server (0600). `--env` values are sent over stdin, never on the command line.

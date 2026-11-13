@@ -35,6 +35,30 @@ func (fakeBackend) Logs(_ context.Context, app string, o core.LogsOptions, w io.
 	return nil
 }
 
+func (fakeBackend) StartAction(context.Context, string, string) (*Job, error) {
+	return nil, ErrUnknownAction
+}
+func (fakeBackend) StartDeploy(_ context.Context, req core.DeployRequest) (*Job, error) {
+	if req.Image == "" && req.Repo == "" {
+		return nil, fmt.Errorf("%w: specify a repository or an image", ErrInvalidRequest)
+	}
+	return &Job{ID: "d1", App: core.DeployName(req), Action: "deploy", Status: JobRunning}, nil
+}
+func (fakeBackend) ListJobs(_ context.Context, app string) ([]Job, error) {
+	return []Job{{ID: "j1", App: "web", Action: "restart", Status: JobSucceeded}}, nil
+}
+func (fakeBackend) Stats(context.Context) (map[string]core.Stats, error) {
+	return map[string]core.Stats{"web": {CPU: 1.5, MemPerc: 2}}, nil
+}
+func (fakeBackend) StatsHistory(context.Context) (map[string][]Sample, error) {
+	return map[string][]Sample{"web": {{T: 1, Stats: core.Stats{CPU: 1}}}}, nil
+}
+func (fakeBackend) Job(context.Context, string) (*Job, error) { return nil, ErrJobNotFound }
+func (fakeBackend) CancelJob(context.Context, string) error   { return ErrJobNotFound }
+func (fakeBackend) JobEvents(context.Context, string, func(string, string) error) error {
+	return ErrJobNotFound
+}
+
 type reg map[string]Backend
 
 func (r reg) Servers() []ServerInfo {
@@ -91,7 +115,9 @@ func TestAuthRequired(t *testing.T) {
 
 func TestSessionCookie(t *testing.T) {
 	s := newServer(t, reg{"local": fakeBackend{}})
-	resp, err := http.Post(s.URL+"/api/v1/session", "application/json", strings.NewReader(`{"token":"`+tok+`"}`))
+	req0, _ := http.NewRequest("POST", s.URL+"/api/v1/session", strings.NewReader(`{"token":"`+tok+`"}`))
+	req0.Header.Set(csrfHeader, "1")
+	resp, err := http.DefaultClient.Do(req0)
 	if err != nil || resp.StatusCode != 200 {
 		t.Fatalf("login: %v %d", err, resp.StatusCode)
 	}

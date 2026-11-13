@@ -8,6 +8,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -29,12 +30,27 @@ const LocalServer = "local"
 
 const cookieName = "shipyard_session"
 
+// csrfHeader must accompany state-changing requests. Browsers cannot set a
+// custom header cross-origin without a CORS preflight, which this server
+// never approves, so a third-party page cannot trigger actions.
+const csrfHeader = "X-Shipyard"
+
 // ServerInfo is an entry of GET /api/v1/servers.
 type ServerInfo struct {
 	Name    string `json:"name"`
 	Kind    string `json:"kind"` // local | remote
 	URL     string `json:"url,omitempty"`
 	Default bool   `json:"default"`
+	// Upgradable: this handler can update shipyard on the server (over SSH).
+	Upgradable bool `json:"upgradable,omitempty"`
+	// Routes lists the ways to reach the server and which one is in use.
+	Routes []RouteStatus `json:"routes,omitempty"`
+}
+
+// Upgrader is implemented by backends that can update the shipyard
+// running on their server (the workstation gateway, over SSH).
+type Upgrader interface {
+	Upgrade(ctx context.Context) (*Job, error)
 }
 
 // Registry resolves server names to backends.
@@ -53,6 +69,27 @@ type Options struct {
 	// LoopbackOnly rejects requests whose Host is not localhost, which
 	// blocks DNS-rebinding attacks against a UI bound to 127.0.0.1.
 	LoopbackOnly bool
+
+	// Access, when set, requires a valid Cloudflare Access token on every
+	// request that arrives through Cloudflare. LAN and SSH-tunnel requests
+	// are unaffected (they still need the shipyard token).
+	Access *AccessVerifier
+	// AccessLogin lets a verified Access user in without the shipyard
+	// token (browser sign-in through Cloudflare). Service tokens never
+	// count as a login.
+	AccessLogin bool
+	// AllowedEmails restricts AccessLogin to these users (empty: anyone
+	// your Access policy lets through).
+	AllowedEmails []string
+}
+
+type ctxKey int
+
+const identityKey ctxKey = 0
+
+func identityFrom(r *http.Request) *Identity {
+	id, _ := r.Context().Value(identityKey).(*Identity)
+	return id
 }
 
 // Handler returns the API + UI handler.
@@ -61,7 +98,14 @@ func Handler(o Options) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/session", h.auth(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
+		out := map[string]any{"authenticated": true}
+		if id := identityFrom(r); id != nil {
+			out["access"] = true // behind Cloudflare Access: sign out there
+			if id.Email != "" {
+				out["email"] = id.Email
+			}
+		}
+		writeJSON(w, http.StatusOK, out)
 	}))
 	mux.HandleFunc("POST /api/v1/session", h.login)
 	mux.HandleFunc("DELETE /api/v1/session", h.logout)
@@ -86,6 +130,77 @@ func Handler(o Options) http.Handler {
 	}))
 	mux.HandleFunc("GET /api/v1/servers/{server}/apps/{app}/logs", h.backend(h.logs))
 
+	mux.HandleFunc("POST /api/v1/servers/{server}/apps/{app}/actions/{action}", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		job, err := b.StartAction(r.Context(), r.PathValue("app"), r.PathValue("action"))
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job)
+	}))
+	mux.HandleFunc("GET /api/v1/servers/{server}/stats", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		stats, err := b.Stats(r.Context())
+		if stats == nil && err == nil {
+			stats = map[string]core.Stats{}
+		}
+		respond(w, stats, err)
+	}))
+	mux.HandleFunc("GET /api/v1/servers/{server}/stats/history", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		hist, err := b.StatsHistory(r.Context())
+		if hist == nil && err == nil {
+			hist = map[string][]Sample{}
+		}
+		respond(w, hist, err)
+	}))
+	mux.HandleFunc("POST /api/v1/servers/{server}/deploy", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		var req core.DeployRequest
+		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid deploy request: "+err.Error())
+			return
+		}
+		job, err := b.StartDeploy(r.Context(), req)
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job)
+	}))
+	mux.HandleFunc("POST /api/v1/servers/{server}/upgrade", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		u, ok := b.(Upgrader)
+		if !ok {
+			writeError(w, http.StatusBadRequest, ErrInvalidRequest.Error()+
+				": this server cannot be updated from here; run shipyard server upgrade from your workstation")
+			return
+		}
+		job, err := u.Upgrade(r.Context())
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job)
+	}))
+	mux.HandleFunc("GET /api/v1/servers/{server}/jobs", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		jobs, err := b.ListJobs(r.Context(), r.URL.Query().Get("app"))
+		if jobs == nil && err == nil {
+			jobs = []Job{}
+		}
+		respond(w, jobs, err)
+	}))
+	mux.HandleFunc("GET /api/v1/servers/{server}/jobs/{id}", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		job, err := b.Job(r.Context(), r.PathValue("id"))
+		respond(w, job, err)
+	}))
+	mux.HandleFunc("POST /api/v1/servers/{server}/jobs/{id}/cancel", h.backend(func(w http.ResponseWriter, r *http.Request, b Backend) {
+		if err := b.CancelJob(r.Context(), r.PathValue("id")); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	mux.HandleFunc("GET /api/v1/servers/{server}/jobs/{id}/events", h.backend(h.jobEvents))
+
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})
@@ -107,6 +222,14 @@ func (h *handler) guard(next http.Handler) http.Handler {
 		if h.o.LoopbackOnly && !loopbackHost(r.Host) {
 			http.Error(w, "forbidden host", http.StatusForbidden)
 			return
+		}
+		if r.Header.Get(cfConnectingIP) != "" && h.o.Access != nil {
+			id, err := h.o.Access.FromRequest(r)
+			if err != nil {
+				writeError(w, http.StatusForbidden, "cloudflare access: "+err.Error())
+				return
+			}
+			r = r.WithContext(context.WithValue(r.Context(), identityKey, id))
 		}
 		hd := w.Header()
 		hd.Set("X-Content-Type-Options", "nosniff")
@@ -130,6 +253,9 @@ func loopbackHost(hostport string) bool {
 }
 
 func (h *handler) authorized(r *http.Request) bool {
+	if id := identityFrom(r); id != nil && h.o.AccessLogin && id.Email != "" && h.emailAllowed(id.Email) {
+		return true
+	}
 	tok := ""
 	if a := r.Header.Get("Authorization"); strings.HasPrefix(a, "Bearer ") {
 		tok = strings.TrimPrefix(a, "Bearer ")
@@ -140,10 +266,26 @@ func (h *handler) authorized(r *http.Request) bool {
 		subtle.ConstantTimeCompare([]byte(tok), []byte(h.o.Token)) == 1
 }
 
+func (h *handler) emailAllowed(email string) bool {
+	if len(h.o.AllowedEmails) == 0 {
+		return true
+	}
+	for _, e := range h.o.AllowedEmails {
+		if strings.EqualFold(strings.TrimSpace(e), email) {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *handler) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !h.authorized(r) {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get(csrfHeader) == "" {
+			writeError(w, http.StatusForbidden, "missing "+csrfHeader+" header")
 			return
 		}
 		next(w, r)
@@ -166,6 +308,10 @@ func (h *handler) backend(next func(http.ResponseWriter, *http.Request, Backend)
 // =========================
 
 func (h *handler) login(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get(csrfHeader) == "" {
+		writeError(w, http.StatusForbidden, "missing "+csrfHeader+" header")
+		return
+	}
 	var body struct {
 		Token string `json:"token"`
 	}
@@ -223,21 +369,8 @@ func (h *handler) logs(w http.ResponseWriter, r *http.Request, b Backend) {
 
 	sw := &sseWriter{w: w, fl: fl}
 	sw.comment("connected")
-
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		t := time.NewTicker(15 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				sw.comment("ping")
-			case <-done:
-				return
-			}
-		}
-	}()
+	stop := sw.keepAlive()
+	defer stop()
 
 	err := b.Logs(r.Context(), r.PathValue("app"), opts, sw)
 	sw.flushPartial()
@@ -285,6 +418,24 @@ func (s *sseWriter) flushPartial() {
 	}
 }
 
+// keepAlive sends a comment every 15s until the returned stop is called.
+func (s *sseWriter) keepAlive() (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(15 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				s.comment("ping")
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
 func (s *sseWriter) comment(c string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -297,6 +448,39 @@ func (s *sseWriter) event(name, data string) {
 	defer s.mu.Unlock()
 	_, _ = io.WriteString(s.w, "event: "+name+"\ndata: "+strings.ReplaceAll(data, "\n", " ")+"\n\n")
 	s.fl.Flush()
+}
+
+// jobEvents streams a job as SSE: progress / output / done events, from
+// the beginning, so a reconnecting browser sees the whole history.
+func (h *handler) jobEvents(w http.ResponseWriter, r *http.Request, b Backend) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+	id := r.PathValue("id")
+	if _, err := b.Job(r.Context(), id); err != nil {
+		respond(w, nil, err)
+		return
+	}
+	hd := w.Header()
+	hd.Set("Content-Type", "text/event-stream")
+	hd.Set("Cache-Control", "no-cache")
+	hd.Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	sw := &sseWriter{w: w, fl: fl}
+	sw.comment("connected")
+	stop := sw.keepAlive()
+	defer stop()
+
+	err := b.JobEvents(r.Context(), id, func(kind, data string) error {
+		sw.event(kind, data)
+		return nil
+	})
+	if err != nil && r.Context().Err() == nil {
+		sw.event("error", err.Error())
+	}
 }
 
 // =========================
@@ -337,8 +521,12 @@ func respond(w http.ResponseWriter, v any, err error) {
 	if err != nil {
 		var re *RemoteError
 		switch {
-		case errors.Is(err, core.ErrNotFound):
+		case errors.Is(err, core.ErrNotFound), errors.Is(err, ErrJobNotFound):
 			writeError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrBusy):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, ErrUnknownAction), errors.Is(err, ErrInvalidRequest):
+			writeError(w, http.StatusBadRequest, err.Error())
 		case errors.As(err, &re):
 			writeError(w, http.StatusBadGateway, re.Message)
 		default:
